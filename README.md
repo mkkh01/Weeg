@@ -9,10 +9,10 @@ pip install -r requirements.txt
 export SUPABASE_URL="https://<project-ref>.supabase.co"
 export SUPABASE_KEY="<publishable-or-service-key>"
 export REDIS_URL="redis://..."
-python main.py
+python3 main.py
 ```
 
-Open `http://localhost:10000`. Render uses the same `python main.py` start command from `render.yaml` and `Procfile`; the application binds to Render's `PORT` automatically. In an existing Render service, set **Language = Python**, **Build Command = `pip install -r requirements.txt`**, and **Start Command = `python main.py`**. Do not leave the service language as Rust, because Render will then run `cargo build --release` and ignore the Python build command.
+Open `http://localhost:10000`. Render uses the same `python3 main.py` start command from `render.yaml` and `Procfile`; the application binds to Render's `PORT` automatically. In an existing Render service, set **Language = Python**, **Build Command = `pip install -r requirements.txt`**, and **Start Command = `python3 main.py`**. Do not leave the service language as Rust, because Render will then run `cargo build --release` and ignore the Python build command.
 
 ## Supabase
 
