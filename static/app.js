@@ -10,7 +10,8 @@ const state = {
   requestId: 0,
   overviewLoading: false,
   activeLoading: false,
-  refreshTimer: null
+  refreshTimer: null,
+  liveBar: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -19,6 +20,7 @@ const fmt = (value) => value === undefined || value === null || Number.isNaN(Num
   ? '—'
   : Number(value).toLocaleString('en-US', { maximumFractionDigits: 8 });
 const pct = (value) => `${Number(value || 0) >= 0 ? '+' : ''}${Number(value || 0).toFixed(2)}%`;
+const intervalSeconds = { '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
 
 function toast(text) {
   const el = $('#toast');
@@ -78,6 +80,7 @@ async function loadChart(requestId = state.requestId) {
   const candles = data.candles || [];
   state.candleSeries.setData(candles.map((candle) => ({ time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close })));
   state.lineSeries.setData(candles.map((candle) => ({ time: candle.time, value: candle.close })));
+  state.liveBar = candles.length ? { ...candles[candles.length - 1] } : null;
   state.chart.timeScale().fitContent();
 }
 
@@ -98,6 +101,23 @@ function renderSignal(item) {
   $('#active-change').className = Number(ticker.change || 0) >= 0 ? 'positive' : 'negative';
   const color = signal === 'LONG' ? 'positive' : signal === 'SHORT' ? 'negative' : 'neutral';
   $('#signal-content').innerHTML = `<div class="signal-main"><div><span class="eyebrow">${item.regime || 'TRANSITION'}</span><div class="signal-word ${color}">${signal}</div></div><div><span class="eyebrow">CONFIDENCE</span><div class="confidence">${item.confidence || 0}</div></div></div><div class="reasons">${(item.reasons || [item.reason || 'لا توجد أسباب كافية']).map((reason) => `<span class="reason">✓ ${reason}</span>`).join('')}</div><div class="levels"><div class="level"><small>ENTRY</small><strong>${fmt(item.entry)}</strong></div><div class="level"><small>STOP LOSS</small><strong class="negative">${fmt(item.stop_loss)}</strong></div><div class="level"><small>TP1</small><strong class="positive">${fmt(item.take_profit_1)}</strong></div><div class="level"><small>TP2</small><strong class="positive">${fmt(item.take_profit_2)}</strong></div></div>`;
+}
+
+function updateLiveChart(candle) {
+  if (!state.candleSeries || !candle || candle.symbol === state.symbol) {
+    if (!state.candleSeries || !candle) return;
+  }
+  const seconds = intervalSeconds[state.interval] || 900;
+  const bucketTime = Math.floor(Number(candle.time) / seconds) * seconds;
+  if (!state.liveBar || state.liveBar.time !== bucketTime) {
+    state.liveBar = { time: bucketTime, open: candle.open, high: candle.high, low: candle.low, close: candle.close };
+  } else {
+    state.liveBar.high = Math.max(state.liveBar.high, candle.high);
+    state.liveBar.low = Math.min(state.liveBar.low, candle.low);
+    state.liveBar.close = candle.close;
+  }
+  state.candleSeries.update({ time: state.liveBar.time, open: state.liveBar.open, high: state.liveBar.high, low: state.liveBar.low, close: state.liveBar.close });
+  state.lineSeries.update({ time: state.liveBar.time, value: state.liveBar.close });
 }
 
 function activeOverviewItem() {
@@ -189,6 +209,7 @@ function connectWS() {
       item.ticker = data.ticker;
       renderWatchlist();
       if (data.symbol === state.symbol) {
+        updateLiveChart(data.candle);
         const ticker = data.ticker || {};
         $('#active-price').textContent = fmt(ticker.price);
         $('#active-change').textContent = pct(ticker.change);
