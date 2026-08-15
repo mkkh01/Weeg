@@ -5,14 +5,14 @@ Weeg is a modular crypto-market analysis dashboard. It is an **analysis and pape
 ## Run locally
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 export SUPABASE_URL="https://<project-ref>.supabase.co"
 export SUPABASE_KEY="<publishable-or-service-key>"
 export REDIS_URL="redis://..."
-python3 main.py
+.venv/bin/python main.py
 ```
 
-Open `http://localhost:10000`. Render uses the same `python3 main.py` start command from `render.yaml` and `Procfile`; the application binds to Render's `PORT` automatically. In an existing Render service, set **Language = Python**, **Build Command = `pip install -r requirements.txt`**, and **Start Command = `python3 main.py`**. Do not leave the service language as Rust, because Render will then run `cargo build --release` and ignore the Python build command.
+Open `http://localhost:10000`. Render uses the same `.venv/bin/python main.py` start command from `render.yaml` and `Procfile`; the application binds to Render's `PORT` automatically. In an existing Render service, set **Language = Python**, **Build Command = `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`**, and **Start Command = `.venv/bin/python main.py`**. This ensures the packages installed during build are the same packages used during startup. Do not leave the service language as Rust, because Render will then run `cargo build --release` and ignore the Python build command.
 
 ## Supabase
 

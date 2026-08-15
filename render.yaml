@@ -2,8 +2,8 @@ services:
   - type: web
     name: weeg-trading-dashboard
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python3 main.py
+    buildCommand: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+    startCommand: .venv/bin/python main.py
     healthCheckPath: /api/health
     envVars:
       - key: SUPABASE_URL
