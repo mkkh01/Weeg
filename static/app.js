@@ -1,16 +1,243 @@
-const state={symbol:'BTCUSDT',interval:'15m',overview:[],chart:null,candleSeries:null,ws:null,signal:null};
-const $=s=>document.querySelector(s); const $$=s=>[...document.querySelectorAll(s)];
-const fmt=n=>n===undefined||n===null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:8});
-const pct=n=>`${Number(n||0)>=0?'+':''}${Number(n||0).toFixed(2)}%`;
-function toast(text){const el=$('#toast');el.textContent=text;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400)}
-async function api(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error(await r.text());return r.json()}
-function renderWatchlist(){const q=$('#symbol-search').value.toUpperCase();const rows=state.overview.filter(x=>x.symbol.includes(q));$('#watchlist').innerHTML=rows.map(x=>{const t=x.ticker||{};const change=t.change??0;return `<div class="watch-item ${x.symbol===state.symbol?'active':''}" data-symbol="${x.symbol}"><div><span class="watch-symbol">${x.symbol}</span><span class="watch-sub">${x.signal||'NO TRADE'} · ${x.confidence||0}%</span></div><div><div class="watch-price">${fmt(t.price||x.price)}</div><div class="watch-change ${change>=0?'positive':'negative'}">${pct(change)}</div></div></div>`}).join('');$$('.watch-item').forEach(el=>el.onclick=()=>selectSymbol(el.dataset.symbol))}
-function initChart(){const container=$('#chart');state.chart=LightweightCharts.createChart(container,{layout:{background:{color:'#0b1621'},textColor:'#7890a2'},grid:{vertLines:{color:'#132534'},horzLines:{color:'#132534'}},rightPriceScale:{borderColor:'#22394a'},timeScale:{borderColor:'#22394a',timeVisible:true,secondsVisible:false},crosshair:{mode:LightweightCharts.CrosshairMode.Normal}});state.candleSeries=state.chart.addCandlestickSeries({upColor:'#33d69a',downColor:'#ff6b78',borderVisible:false,wickUpColor:'#33d69a',wickDownColor:'#ff6b78'});new ResizeObserver(()=>state.chart.applyOptions({width:container.clientWidth})).observe(container)}
-async function loadChart(){const data=await api(`/api/market/candles?symbol=${state.symbol}&interval=${state.interval}&limit=250`);state.candleSeries.setData(data.candles.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));state.chart.timeScale().fitContent()}
-function renderSignal(x){state.signal=x;const badge=$('#active-signal');badge.textContent=x.signal;badge.className=`signal-badge ${x.signal==='LONG'?'long':x.signal==='SHORT'?'short':'neutral'}`;$('#active-symbol').textContent=x.symbol;$('#active-price').textContent=fmt(x.price);$('#active-regime').textContent=x.regime||'—';$('#active-confidence').textContent=`${x.confidence||0}%`;$('#active-rr').textContent=x.rr?`1:${x.rr}`:'—';const ticker=x.ticker||{};$('#active-change').textContent=pct(ticker.change);$('#active-change').className=ticker.change>=0?'positive':'negative';const colors=x.signal==='LONG'?'positive':x.signal==='SHORT'?'negative':'neutral';$('#signal-content').innerHTML=`<div class="signal-main"><div><span class="eyebrow">${x.regime||'TRANSITION'}</span><div class="signal-word ${colors}">${x.signal}</div></div><div><span class="eyebrow">CONFIDENCE</span><div class="confidence">${x.confidence||0}</div></div></div><div class="reasons">${(x.reasons||[x.reason||'لا توجد أسباب كافية']).map(r=>`<span class="reason">✓ ${r}</span>`).join('')}</div><div class="levels"><div class="level"><small>ENTRY</small><strong>${fmt(x.entry)}</strong></div><div class="level"><small>STOP LOSS</small><strong class="negative">${fmt(x.stop_loss)}</strong></div><div class="level"><small>TP1</small><strong class="positive">${fmt(x.take_profit_1)}</strong></div><div class="level"><small>TP2</small><strong class="positive">${fmt(x.take_profit_2)}</strong></div></div>`}
-async function selectSymbol(symbol){state.symbol=symbol;renderWatchlist();try{const x=await api(`/api/signals/${symbol}?interval=${state.interval}`);renderSignal({...x,ticker:state.overview.find(s=>s.symbol===symbol)?.ticker});await loadChart()}catch(e){toast('تعذر تحميل بيانات العملة')}}
-async function loadOverview(){try{state.overview=await api(`/api/market/overview?interval=${state.interval}`);renderWatchlist();const active=state.overview.find(x=>x.symbol===state.symbol)||state.overview[0];if(active)renderSignal(active);$('#last-update').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});await loadChart()}catch(e){toast('تعذر الاتصال بمصدر السوق')}}
-async function loadTrades(status='open'){try{const rows=await api(`/api/trades?status=${status==='open'?'OPEN':'CLOSED'}`);$('#trades-body').innerHTML=rows.length?rows.map(t=>`<tr><td>${t.symbol}</td><td class="${t.direction==='LONG'?'positive':'negative'}">${t.direction}</td><td>${fmt(t.entry)}</td><td>${fmt(t.stop_loss)}</td><td>${fmt(t.take_profit_1)}</td><td>${t.status}</td></tr>`).join(''):`<tr><td colspan="6" class="neutral">لا توجد صفقات ${status==='open'?'مفتوحة':'مغلقة'} بعد</td></tr>`}catch(e){}}
-function connectWS(){const protocol=location.protocol==='https:'?'wss':'ws';state.ws=new WebSocket(`${protocol}://${location.host}/ws`);state.ws.onopen=()=>$('#connection-dot').style.background='var(--green)';state.ws.onclose=()=>{ $('#connection-dot').style.background='var(--red)';setTimeout(connectWS,3000)};state.ws.onmessage=ev=>{const data=JSON.parse(ev.data);if(data.type==='candle'&&data.symbol===state.symbol){const c=data.candle;state.candleSeries.update({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close});const item=state.overview.find(x=>x.symbol===data.symbol);if(item){item.price=c.close;item.ticker=data.ticker;renderSignal(item);renderWatchlist()}}}}
-$('#symbol-search').oninput=renderWatchlist;$('#refresh-btn').onclick=loadOverview;$('#zoom-in').onclick=()=>state.chart.timeScale().scrollToPosition(4,true);$('#zoom-out').onclick=()=>state.chart.timeScale().scrollToPosition(-4,true);$('#fit-chart').onclick=()=>state.chart.timeScale().fitContent();$('#add-symbol').onclick=()=>toast('عدّل قائمة العملات من متغير SYMBOLS أو الإعدادات');$('#settings-btn').onclick=()=>toast('الإعدادات محفوظة عبر Supabase عند توفير SUPABASE_URL وSUPABASE_KEY');$('#explain-btn').onclick=()=>toast((state.signal?.reasons||[]).join(' · ')||'لا يوجد تفسير متاح');$$('#timeframes button').forEach(b=>b.onclick=()=>{$$('#timeframes button').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');state.interval=b.dataset.interval;loadOverview()});$$('.trade-tabs button').forEach(b=>b.onclick=()=>{$$('.trade-tabs button').forEach(x=>x.classList.remove('active'));b.classList.add('active');loadTrades(b.dataset.status)});
-(async()=>{initChart();connectWS();await loadOverview();await loadTrades()})();
+const state = {
+  symbol: 'BTCUSDT',
+  interval: '15m',
+  overview: [],
+  chart: null,
+  candleSeries: null,
+  lineSeries: null,
+  ws: null,
+  signal: null,
+  requestId: 0,
+  overviewLoading: false,
+  activeLoading: false,
+  refreshTimer: null
+};
+
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+const fmt = (value) => value === undefined || value === null || Number.isNaN(Number(value))
+  ? '—'
+  : Number(value).toLocaleString('en-US', { maximumFractionDigits: 8 });
+const pct = (value) => `${Number(value || 0) >= 0 ? '+' : ''}${Number(value || 0).toFixed(2)}%`;
+
+function toast(text) {
+  const el = $('#toast');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+async function api(url, options = {}) {
+  const response = await fetch(url, { ...options, headers: { Accept: 'application/json', ...(options.headers || {}) } });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+
+function renderWatchlist() {
+  const query = ($('#symbol-search')?.value || '').trim().toUpperCase();
+  const rows = state.overview.filter((item) => item.symbol.includes(query));
+  $('#watchlist').innerHTML = rows.length
+    ? rows.map((item) => {
+      const ticker = item.ticker || {};
+      const change = Number(ticker.change || 0);
+      return `<button class="watch-item ${item.symbol === state.symbol ? 'active' : ''}" data-symbol="${item.symbol}" type="button">
+        <span><span class="watch-symbol">${item.symbol}</span><span class="watch-sub">${item.signal || 'NO TRADE'} · ${item.confidence || 0}%</span></span>
+        <span><span class="watch-price">${fmt(ticker.price ?? item.price)}</span><span class="watch-change ${change >= 0 ? 'positive' : 'negative'}">${pct(change)}</span></span>
+      </button>`;
+    }).join('')
+    : '<div class="empty-state">لا توجد عملة مطابقة</div>';
+  $$('.watch-item').forEach((element) => {
+    element.addEventListener('click', () => selectSymbol(element.dataset.symbol));
+  });
+  const mobileSelect = $('#mobile-symbol-select');
+  if (mobileSelect) {
+    mobileSelect.innerHTML = state.overview.map((item) => `<option value="${item.symbol}">${item.symbol}</option>`).join('');
+    mobileSelect.value = state.symbol;
+  }
+}
+
+function initChart() {
+  const container = $('#chart');
+  state.chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: '#0b1621' }, textColor: '#7890a2' },
+    grid: { vertLines: { color: '#132534' }, horzLines: { color: '#132534' } },
+    rightPriceScale: { borderColor: '#22394a' },
+    timeScale: { borderColor: '#22394a', timeVisible: true, secondsVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+  });
+  state.candleSeries = state.chart.addCandlestickSeries({ upColor: '#33d69a', downColor: '#ff6b78', borderVisible: false, wickUpColor: '#33d69a', wickDownColor: '#ff6b78' });
+  state.lineSeries = state.chart.addLineSeries({ color: '#54a9ff', lineWidth: 2, visible: false });
+  new ResizeObserver(() => state.chart.applyOptions({ width: container.clientWidth })).observe(container);
+}
+
+async function loadChart(requestId = state.requestId) {
+  const data = await api(`/api/market/candles?symbol=${encodeURIComponent(state.symbol)}&interval=${encodeURIComponent(state.interval)}&limit=250`);
+  if (requestId !== state.requestId) return;
+  const candles = data.candles || [];
+  state.candleSeries.setData(candles.map((candle) => ({ time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close })));
+  state.lineSeries.setData(candles.map((candle) => ({ time: candle.time, value: candle.close })));
+  state.chart.timeScale().fitContent();
+}
+
+function renderSignal(item) {
+  if (!item) return;
+  state.signal = item;
+  const signal = item.signal || 'NO TRADE';
+  const ticker = item.ticker || {};
+  const badge = $('#active-signal');
+  badge.textContent = signal;
+  badge.className = `signal-badge ${signal === 'LONG' ? 'long' : signal === 'SHORT' ? 'short' : 'neutral'}`;
+  $('#active-symbol').textContent = item.symbol;
+  $('#active-price').textContent = fmt(ticker.price ?? item.price);
+  $('#active-regime').textContent = item.regime || '—';
+  $('#active-confidence').textContent = `${item.confidence || 0}%`;
+  $('#active-rr').textContent = item.rr ? `1:${item.rr}` : '—';
+  $('#active-change').textContent = pct(ticker.change);
+  $('#active-change').className = Number(ticker.change || 0) >= 0 ? 'positive' : 'negative';
+  const color = signal === 'LONG' ? 'positive' : signal === 'SHORT' ? 'negative' : 'neutral';
+  $('#signal-content').innerHTML = `<div class="signal-main"><div><span class="eyebrow">${item.regime || 'TRANSITION'}</span><div class="signal-word ${color}">${signal}</div></div><div><span class="eyebrow">CONFIDENCE</span><div class="confidence">${item.confidence || 0}</div></div></div><div class="reasons">${(item.reasons || [item.reason || 'لا توجد أسباب كافية']).map((reason) => `<span class="reason">✓ ${reason}</span>`).join('')}</div><div class="levels"><div class="level"><small>ENTRY</small><strong>${fmt(item.entry)}</strong></div><div class="level"><small>STOP LOSS</small><strong class="negative">${fmt(item.stop_loss)}</strong></div><div class="level"><small>TP1</small><strong class="positive">${fmt(item.take_profit_1)}</strong></div><div class="level"><small>TP2</small><strong class="positive">${fmt(item.take_profit_2)}</strong></div></div>`;
+}
+
+function activeOverviewItem() {
+  return state.overview.find((item) => item.symbol === state.symbol);
+}
+
+async function selectSymbol(symbol) {
+  if (!symbol || symbol === state.symbol && state.activeLoading) return;
+  state.symbol = symbol.toUpperCase();
+  const requestId = ++state.requestId;
+  renderWatchlist();
+  const active = activeOverviewItem();
+  if (active) renderSignal(active);
+  state.activeLoading = true;
+  try {
+    const [signal] = await Promise.all([
+      api(`/api/signals/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}`),
+      loadChart(requestId)
+    ]);
+    if (requestId !== state.requestId) return;
+    renderSignal({ ...signal, ticker: activeOverviewItem()?.ticker });
+    $('#last-update').textContent = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  } catch (error) {
+    if (requestId === state.requestId) toast(`تعذر تحميل ${state.symbol}`);
+  } finally {
+    if (requestId === state.requestId) state.activeLoading = false;
+  }
+}
+
+async function loadOverview() {
+  if (state.overviewLoading) return;
+  state.overviewLoading = true;
+  try {
+    const data = await api(`/api/market/overview?interval=${encodeURIComponent(state.interval)}`);
+    state.overview = Array.isArray(data) ? data : [];
+    if (!state.overview.some((item) => item.symbol === state.symbol)) state.symbol = state.overview[0]?.symbol || state.symbol;
+    renderWatchlist();
+    await selectSymbol(state.symbol);
+  } catch (error) {
+    toast('تعذر الاتصال بمصدر السوق');
+  } finally {
+    state.overviewLoading = false;
+  }
+}
+
+async function refreshActive() {
+  if (state.activeLoading || !state.symbol) return;
+  const requestId = ++state.requestId;
+  state.activeLoading = true;
+  try {
+    const [signal] = await Promise.all([
+      api(`/api/signals/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}`),
+      loadChart(requestId)
+    ]);
+    if (requestId !== state.requestId) return;
+    renderSignal({ ...signal, ticker: activeOverviewItem()?.ticker });
+    renderWatchlist();
+    $('#last-update').textContent = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  } catch (error) {
+    // Live websocket remains available even when a refresh request fails.
+  } finally {
+    if (requestId === state.requestId) state.activeLoading = false;
+  }
+}
+
+async function loadTrades(status = 'open') {
+  try {
+    const rows = await api(`/api/trades?status=${status === 'open' ? 'OPEN' : 'CLOSED'}`);
+    $('#trades-body').innerHTML = rows.length
+      ? rows.map((trade) => `<tr><td>${trade.symbol}</td><td class="${trade.direction === 'LONG' ? 'positive' : 'negative'}">${trade.direction}</td><td>${fmt(trade.entry)}</td><td>${fmt(trade.stop_loss)}</td><td>${fmt(trade.take_profit_1)}</td><td>${trade.status}</td></tr>`).join('')
+      : `<tr><td colspan="6" class="neutral">لا توجد صفقات ${status === 'open' ? 'مفتوحة' : 'مغلقة'} بعد</td></tr>`;
+  } catch (error) {
+    toast('تعذر تحميل سجل الصفقات');
+  }
+}
+
+function connectWS() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  state.ws = new WebSocket(`${protocol}://${location.host}/ws`);
+  state.ws.onopen = () => { $('#connection-dot').style.background = 'var(--green)'; };
+  state.ws.onclose = () => { $('#connection-dot').style.background = 'var(--red)'; setTimeout(connectWS, 3000); };
+  state.ws.onerror = () => state.ws.close();
+  state.ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type !== 'candle' || !data.symbol) return;
+    const item = state.overview.find((entry) => entry.symbol === data.symbol);
+    if (item) {
+      item.price = data.candle.close;
+      item.ticker = data.ticker;
+      renderWatchlist();
+      if (data.symbol === state.symbol) {
+        const ticker = data.ticker || {};
+        $('#active-price').textContent = fmt(ticker.price);
+        $('#active-change').textContent = pct(ticker.change);
+        $('#active-change').className = Number(ticker.change || 0) >= 0 ? 'positive' : 'negative';
+      }
+    }
+  };
+}
+
+$('#symbol-search').oninput = renderWatchlist;
+$('#mobile-symbol-select').onchange = (event) => selectSymbol(event.target.value);
+$('#refresh-btn').onclick = () => { loadOverview(); loadTrades(); };
+$('#zoom-in').title = 'تكبير الشارت: عرض شموع أقل بتفاصيل أكبر';
+$('#zoom-out').title = 'إبعاد الشارت: عرض شموع أكثر';
+$('#fit-chart').title = 'ملاءمة كامل البيانات';
+$('#zoom-in').onclick = () => state.chart.timeScale().scrollToPosition(5, true);
+$('#zoom-out').onclick = () => state.chart.timeScale().scrollToPosition(-5, true);
+$('#fit-chart').onclick = () => state.chart.timeScale().fitContent();
+$('#add-symbol').onclick = () => toast('يمكن تتبع أي زوج موجود في قائمة SYMBOLS من إعدادات Render');
+$('#settings-btn').onclick = () => toast('الإعدادات تحفظ عبر Supabase عند توفير SUPABASE_URL وSUPABASE_KEY');
+$('#explain-btn').onclick = () => toast((state.signal?.reasons || []).join(' · ') || 'لا يوجد تفسير متاح');
+
+$$('#timeframes button').forEach((button) => button.onclick = async () => {
+  $$('#timeframes button').forEach((element) => element.classList.remove('selected'));
+  button.classList.add('selected');
+  state.interval = button.dataset.interval;
+  await loadOverview();
+});
+
+$$('.trade-tabs button').forEach((button) => button.onclick = () => {
+  $$('.trade-tabs button').forEach((element) => element.classList.remove('active'));
+  button.classList.add('active');
+  loadTrades(button.dataset.status);
+});
+
+$$('.chart-toolbar input[data-layer]').forEach((input) => input.onchange = () => toast(`طبقة ${input.parentElement.textContent.trim()} ${input.checked ? 'مفعلة' : 'متوقفة'} — ستظهر التفاصيل مع الإشارات القادمة`));
+$$('.chart-toolbar .tool').forEach((button) => button.onclick = () => {
+  $$('.chart-toolbar .tool').forEach((element) => element.classList.remove('active'));
+  button.classList.add('active');
+  const lineMode = button.textContent.trim() === 'خط';
+  state.candleSeries.applyOptions({ visible: !lineMode });
+  state.lineSeries.applyOptions({ visible: lineMode });
+});
+
+(async () => {
+  initChart();
+  connectWS();
+  await loadOverview();
+  await loadTrades();
+  state.refreshTimer = setInterval(() => { refreshActive(); loadTrades(); }, 30000);
+  setInterval(loadOverview, 60000);
+})();
