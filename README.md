@@ -12,7 +12,7 @@ export REDIS_URL="redis://..."
 .venv/bin/python main.py
 ```
 
-Open `http://localhost:10000`. Render uses the same `.venv/bin/python main.py` start command from `render.yaml` and `Procfile`; the application binds to Render's `PORT` automatically. In an existing Render service, set **Language = Python**, **Build Command = `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`**, and **Start Command = `.venv/bin/python main.py`**. This ensures the packages installed during build are the same packages used during startup. Do not leave the service language as Rust, because Render will then run `cargo build --release` and ignore the Python build command.
+Open `http://localhost:10000`. Render uses `venv/bin/python main.py` from `render.yaml` and `Procfile`; the repository tracks `venv` as a symlink to the build-created `.venv`, so both the current Render setting and the canonical `.venv` build environment resolve to the same interpreter. The application binds to Render's `PORT` automatically. In an existing Render service, set **Language = Python**, **Build Command = `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`**, and **Start Command = `venv/bin/python main.py`**. The tracked `venv -> .venv` symlink ensures the packages installed during build are the same packages used during startup. Do not leave the service language as Rust, because Render will then run `cargo build --release` and ignore the Python build command.
 
 ## Supabase
 
