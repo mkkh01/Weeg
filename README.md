@@ -27,3 +27,9 @@ Apply `migrations/001_weeg_schema.sql` to the selected project before enabling r
 The market adapter loads historical candles from Binance REST and maintains a reconnecting combined WebSocket for the 30 configured symbols. Each event is normalized into UTC timestamped OHLCV data, deduplicated by candle time, and broadcast to the browser. The analysis engine calculates EMA, RSI, ATR, a swing-based structure state, market regime, volume confirmation, confluence confidence, entry, stop loss, take-profit levels, and risk/reward. Thresholds are config-driven and the engine returns `NO TRADE` when confluence or data sufficiency is inadequate.
 
 The browser provides a TradingView-inspired layout without copying TradingView's interface: a watchlist, symbol search, timeframe controls, candle chart with pan/zoom/fit controls, signal explanation, and open/closed paper-trade tabs. The implementation is deliberately paper-only; no exchange API secret or live order endpoint is used.
+
+## الحفظ التلقائي للإشارات المستوفية
+
+يفحص Weeg الأزواج كل دقيقة باستخدام الإطار الافتراضي، وعندما تكون الإشارة `LONG` أو `SHORT` وتستوفي حد الثقة وR:R الخاصين بالأصل، يحفظ صفقة Paper تلقائيًا في `weeg_trades` عند توفر Supabase، أو في SQLite كخطة بديلة. لا ينفذ هذا المسار أي أمر تداول حقيقي.
+
+كل صفقة آلية تحمل `source=auto_signal` و`auto_created=true` وملف الأصل وأسباب الإشارة. يمنع النظام تكرار صفقة آلية مفتوحة لنفس الزوج والإطار الزمني، وتستمر الصفقة في تبويب الصفقات المفتوحة حتى يغلقها المستخدم أو يضيف منطق إدارة الخروج. طُبق القيد في `migrations/002_auto_signal_trades.sql`.

@@ -41,6 +41,31 @@ class Store:
             query += " order by created_at desc limit 200"
             return [json.loads(row[0]) for row in db.execute(query, args).fetchall()]
 
+    async def find_open_auto_trade(self, symbol: str, timeframe: str) -> dict[str, Any] | None:
+        try:
+            remote = await self._supabase(
+                "weeg_trades",
+                params={
+                    "select": "*",
+                    "symbol": f"eq.{symbol.upper()}",
+                    "timeframe": f"eq.{timeframe}",
+                    "auto_created": "eq.true",
+                    "status": "in.(PENDING,OPEN,PARTIAL)",
+                    "order": "signal_time.desc",
+                    "limit": "1",
+                },
+            )
+            if remote:
+                return remote[0]
+        except Exception:
+            pass
+        with sqlite3.connect(self.db_path) as db:
+            row = db.execute(
+                "select payload from trades where json_extract(payload, '$.symbol')=? and json_extract(payload, '$.timeframe')=? and json_extract(payload, '$.auto_created')=1 and status in ('PENDING','OPEN','PARTIAL') order by created_at desc limit 1",
+                (symbol.upper(), timeframe),
+            ).fetchone()
+            return json.loads(row[0]) if row else None
+
     async def create_trade(self, trade: dict[str, Any]) -> dict[str, Any]:
         trade = {**trade, "created_at": datetime.now(timezone.utc).isoformat()}
         try:
