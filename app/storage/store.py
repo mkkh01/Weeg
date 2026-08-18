@@ -41,6 +41,27 @@ class Store:
             query += " order by created_at desc limit 200"
             return [json.loads(row[0]) for row in db.execute(query, args).fetchall()]
 
+    async def list_active_trades(self) -> list[dict[str, Any]]:
+        try:
+            remote = await self._supabase(
+                "weeg_trades",
+                params={
+                    "select": "*",
+                    "status": "in.(PENDING,OPEN,PARTIAL)",
+                    "order": "created_at.asc",
+                    "limit": "500",
+                },
+            )
+            if remote is not None:
+                return remote
+        except Exception:
+            pass
+        with sqlite3.connect(self.db_path) as db:
+            rows = db.execute(
+                "select payload from trades where status in ('PENDING','OPEN','PARTIAL') order by created_at asc limit 500"
+            ).fetchall()
+            return [json.loads(row[0]) for row in rows]
+
     async def find_open_auto_trade(self, symbol: str, timeframe: str) -> dict[str, Any] | None:
         try:
             remote = await self._supabase(

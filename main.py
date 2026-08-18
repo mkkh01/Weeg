@@ -19,6 +19,7 @@ market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings
 store = Store(settings.database_path, settings.supabase_url, settings.supabase_key, settings.redis_url)
 log = logging.getLogger("weeg.auto_signals")
 AUTO_SCAN_SECONDS = 60
+EXIT_SCAN_SECONDS = 5
 
 class TradeInput(BaseModel):
     symbol: str
@@ -96,15 +97,71 @@ async def _auto_signal_loop():
         await asyncio.sleep(AUTO_SCAN_SECONDS)
 
 
+def evaluate_trade_exit(trade: dict, current_price: float) -> dict | None:
+    try:
+        current = float(current_price)
+        entry = float(trade["entry"])
+        stop_loss = float(trade["stop_loss"])
+        take_profit_1 = float(trade["take_profit_1"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    direction = trade.get("direction")
+    if direction == "LONG":
+        stopped = current <= stop_loss
+        target_hit = current >= take_profit_1
+        gross_pnl = (current - entry) / max(abs(entry), 1e-9) * 100
+    elif direction == "SHORT":
+        stopped = current >= stop_loss
+        target_hit = current <= take_profit_1
+        gross_pnl = (entry - current) / max(abs(entry), 1e-9) * 100
+    else:
+        return None
+
+    if not stopped and not target_hit:
+        return None
+    reason = "STOP_LOSS" if stopped else "TAKE_PROFIT_1"
+    return {
+        "status": "STOPPED" if stopped else "CLOSED",
+        "result": "LOSS" if stopped else "WIN",
+        "pnl": round(gross_pnl, 8),
+        "exit_reason": reason,
+        "closed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def _manage_open_trades():
+    while True:
+        try:
+            for trade in await store.list_active_trades():
+                symbol = str(trade.get("symbol", "")).upper()
+                price = market.tickers.get(symbol, {}).get("price")
+                if not symbol or price is None:
+                    continue
+                patch = evaluate_trade_exit(trade, price)
+                if not patch:
+                    continue
+                updated = await store.update_trade(str(trade["id"]), patch)
+                if updated:
+                    log.info("trade %s closed at %s: %s price=%s", trade.get("id"), symbol, patch["exit_reason"], price)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("trade exit manager failed: %s", exc)
+        await asyncio.sleep(EXIT_SCAN_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await market.start()
     auto_task = asyncio.create_task(_auto_signal_loop())
+    exit_task = asyncio.create_task(_manage_open_trades())
     try:
         yield
     finally:
         auto_task.cancel()
-        await asyncio.gather(auto_task, return_exceptions=True)
+        exit_task.cancel()
+        await asyncio.gather(auto_task, exit_task, return_exceptions=True)
         await market.stop()
 
 app = FastAPI(title="Weeg Crypto Trading Intelligence", version="1.0.0", lifespan=lifespan)

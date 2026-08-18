@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     supabase_key: str | None = None
     redis_url: str | None = None
     binance_rest_url: str = "https://data-api.binance.vision"
-    binance_ws_url: str = "wss://stream.binance.us:9443/stream"
+    binance_ws_url: str = "wss://data-stream.binance.vision/stream,wss://stream.binance.us:9443/stream"
     symbols: str = ",".join(DEFAULT_SYMBOLS)
     default_interval: str = "15m"
     cors_origins: str = "*"

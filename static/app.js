@@ -105,9 +105,7 @@ function renderSignal(item) {
 }
 
 function updateLiveChart(candle) {
-  if (!state.candleSeries || !candle || candle.symbol === state.symbol) {
-    if (!state.candleSeries || !candle) return;
-  }
+  if (!state.candleSeries || !candle || (candle.symbol && candle.symbol !== state.symbol)) return;
   const seconds = intervalSeconds[state.interval] || 900;
   const bucketTime = Math.floor(Number(candle.time) / seconds) * seconds;
   if (!state.liveBar || state.liveBar.time !== bucketTime) {
@@ -119,6 +117,22 @@ function updateLiveChart(candle) {
   }
   state.candleSeries.update({ time: state.liveBar.time, open: state.liveBar.open, high: state.liveBar.high, low: state.liveBar.low, close: state.liveBar.close });
   state.lineSeries.update({ time: state.liveBar.time, value: state.liveBar.close });
+}
+
+function updateLivePrice(price, updatedAt = Math.floor(Date.now() / 1000)) {
+  const value = Number(price);
+  if (!state.candleSeries || !Number.isFinite(value)) return;
+  const seconds = intervalSeconds[state.interval] || 900;
+  const bucketTime = Math.floor(Number(updatedAt) / seconds) * seconds;
+  if (!state.liveBar || state.liveBar.time !== bucketTime) {
+    state.liveBar = { time: bucketTime, open: value, high: value, low: value, close: value };
+  } else {
+    state.liveBar.high = Math.max(state.liveBar.high, value);
+    state.liveBar.low = Math.min(state.liveBar.low, value);
+    state.liveBar.close = value;
+  }
+  state.candleSeries.update({ time: state.liveBar.time, open: state.liveBar.open, high: state.liveBar.high, low: state.liveBar.low, close: state.liveBar.close });
+  state.lineSeries.update({ time: state.liveBar.time, value });
 }
 
 function activeOverviewItem() {
@@ -203,19 +217,31 @@ function connectWS() {
   state.ws.onerror = () => state.ws.close();
   state.ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    if (data.type !== 'candle' || !data.symbol) return;
+    if (!data.symbol) return;
     const item = state.overview.find((entry) => entry.symbol === data.symbol);
-    if (item) {
-      item.price = data.candle.close;
+    if (!item) return;
+    if (data.type === 'ticker') {
+      item.price = data.price;
       item.ticker = data.ticker;
       renderWatchlist();
       if (data.symbol === state.symbol) {
-        updateLiveChart(data.candle);
-        const ticker = data.ticker || {};
-        $('#active-price').textContent = fmt(ticker.price);
-        $('#active-change').textContent = pct(ticker.change);
-        $('#active-change').className = Number(ticker.change || 0) >= 0 ? 'positive' : 'negative';
+        updateLivePrice(data.price, data.ticker?.updated_at);
+        $('#active-price').textContent = fmt(data.price);
+        $('#active-change').textContent = pct(data.ticker?.change);
+        $('#active-change').className = Number(data.ticker?.change || 0) >= 0 ? 'positive' : 'negative';
       }
+      return;
+    }
+    if (data.type !== 'candle' || !data.candle) return;
+    item.price = data.ticker?.price ?? data.candle.close;
+    item.ticker = data.ticker;
+    renderWatchlist();
+    if (data.symbol === state.symbol) {
+      updateLiveChart({ ...data.candle, symbol: data.symbol });
+      const ticker = data.ticker || {};
+      $('#active-price').textContent = fmt(ticker.price ?? data.candle.close);
+      $('#active-change').textContent = pct(ticker.change);
+      $('#active-change').className = Number(ticker.change || 0) >= 0 ? 'positive' : 'negative';
     }
   };
 }
