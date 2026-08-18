@@ -11,7 +11,8 @@ const state = {
   overviewLoading: false,
   activeLoading: false,
   refreshTimer: null,
-  liveBar: null
+  liveBar: null,
+  symbolMenuOpen: false
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -40,24 +41,75 @@ async function api(url, options = {}) {
 function renderWatchlist() {
   const query = ($('#symbol-search')?.value || '').trim().toUpperCase();
   const rows = state.overview.filter((item) => item.symbol.includes(query));
-  $('#watchlist').innerHTML = rows.length
-    ? rows.map((item) => {
-      const ticker = item.ticker || {};
-      const change = Number(ticker.change || 0);
-      return `<button class="watch-item ${item.symbol === state.symbol ? 'active' : ''}" data-symbol="${item.symbol}" type="button">
-        <span><span class="watch-symbol">${item.symbol}</span><span class="watch-sub">${item.signal || 'NO TRADE'} · ${item.confidence || 0}%</span></span>
-        <span><span class="watch-price">${fmt(ticker.price ?? item.price)}</span><span class="watch-change ${change >= 0 ? 'positive' : 'negative'}">${pct(change)}</span></span>
-      </button>`;
-    }).join('')
-    : '<div class="empty-state">لا توجد عملة مطابقة</div>';
-  $$('.watch-item').forEach((element) => {
-    element.addEventListener('click', () => selectSymbol(element.dataset.symbol));
-  });
+  const watchlist = $('#watchlist');
+  const existingSymbols = $$('.watch-item').map((element) => element.dataset.symbol).join(',');
+  const nextSymbols = rows.map((item) => item.symbol).join(',');
+  if (existingSymbols !== nextSymbols) {
+    watchlist.innerHTML = rows.length
+      ? rows.map((item) => `<button class="watch-item" data-symbol="${item.symbol}" type="button">
+          <span><span class="watch-symbol">${item.symbol}</span><span class="watch-sub"></span></span>
+          <span><span class="watch-price"></span><span class="watch-change"></span></span>
+        </button>`).join('')
+      : '<div class="empty-state">لا توجد عملة مطابقة</div>';
+    $$('.watch-item').forEach((element) => {
+      element.addEventListener('click', () => selectSymbol(element.dataset.symbol));
+    });
+  }
+  rows.forEach((item) => updateWatchItem(item));
   const mobileSelect = $('#mobile-symbol-select');
   if (mobileSelect) {
-    mobileSelect.innerHTML = state.overview.map((item) => `<option value="${item.symbol}">${item.symbol}</option>`).join('');
-    mobileSelect.value = state.symbol;
+    const selectSymbols = [...mobileSelect.options].map((option) => option.value).join(',');
+    const overviewSymbols = state.overview.map((item) => item.symbol).join(',');
+    if (!state.symbolMenuOpen && selectSymbols !== overviewSymbols) {
+      mobileSelect.innerHTML = state.overview.map((item) => `<option value="${item.symbol}">${item.symbol}</option>`).join('');
+    }
+    if (!state.symbolMenuOpen && mobileSelect.value !== state.symbol) mobileSelect.value = state.symbol;
   }
+  renderMobileSymbolPicker();
+}
+
+function renderMobileSymbolPicker() {
+  const menu = $('#mobile-symbol-menu');
+  const label = $('#mobile-symbol-label');
+  if (!menu || !label) return;
+  label.textContent = state.symbol;
+  const symbols = state.overview.map((item) => item.symbol);
+  const existing = [...menu.querySelectorAll('.mobile-symbol-option')].map((element) => element.dataset.symbol);
+  if (existing.join(',') !== symbols.join(',')) {
+    menu.innerHTML = symbols.map((symbol) => `<button type="button" class="mobile-symbol-option" role="option" data-symbol="${symbol}">${symbol}</button>`).join('');
+  }
+  menu.querySelectorAll('.mobile-symbol-option').forEach((element) => {
+    element.classList.toggle('active', element.dataset.symbol === state.symbol);
+    element.setAttribute('aria-selected', element.dataset.symbol === state.symbol ? 'true' : 'false');
+  });
+}
+
+function setMobileSymbolMenu(open) {
+  const picker = $('#mobile-symbol-picker');
+  const trigger = $('#mobile-symbol-trigger');
+  const menu = $('#mobile-symbol-menu');
+  if (!picker || !trigger || !menu) return;
+  state.symbolMenuOpen = open;
+  picker.classList.toggle('open', open);
+  trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu.hidden = !open;
+  if (open) {
+    renderMobileSymbolPicker();
+    menu.querySelector('.mobile-symbol-option.active')?.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function updateWatchItem(item) {
+  const element = document.querySelector(`.watch-item[data-symbol="${item.symbol}"]`);
+  if (!element) return;
+  const ticker = item.ticker || {};
+  const change = Number(ticker.change || 0);
+  element.classList.toggle('active', item.symbol === state.symbol);
+  element.querySelector('.watch-sub').textContent = `${item.signal || 'NO TRADE'} · ${item.confidence || 0}%`;
+  element.querySelector('.watch-price').textContent = fmt(ticker.price ?? item.price);
+  const changeElement = element.querySelector('.watch-change');
+  changeElement.textContent = pct(change);
+  changeElement.className = `watch-change ${change >= 0 ? 'positive' : 'negative'}`;
 }
 
 function initChart() {
@@ -167,10 +219,16 @@ async function loadOverview() {
   state.overviewLoading = true;
   try {
     const data = await api(`/api/market/overview?interval=${encodeURIComponent(state.interval)}`);
+    const previousSymbol = state.symbol;
     state.overview = Array.isArray(data) ? data : [];
     if (!state.overview.some((item) => item.symbol === state.symbol)) state.symbol = state.overview[0]?.symbol || state.symbol;
     renderWatchlist();
-    await selectSymbol(state.symbol);
+    if (previousSymbol !== state.symbol || !state.signal) {
+      await selectSymbol(state.symbol);
+    } else {
+      const active = activeOverviewItem();
+      if (active) renderSignal(active);
+    }
   } catch (error) {
     toast('تعذر الاتصال بمصدر السوق');
   } finally {
@@ -223,7 +281,7 @@ function connectWS() {
     if (data.type === 'ticker') {
       item.price = data.price;
       item.ticker = data.ticker;
-      renderWatchlist();
+      updateWatchItem(item);
       if (data.symbol === state.symbol) {
         updateLivePrice(data.price, data.ticker?.updated_at);
         $('#active-price').textContent = fmt(data.price);
@@ -235,7 +293,7 @@ function connectWS() {
     if (data.type !== 'candle' || !data.candle) return;
     item.price = data.ticker?.price ?? data.candle.close;
     item.ticker = data.ticker;
-    renderWatchlist();
+    updateWatchItem(item);
     if (data.symbol === state.symbol) {
       updateLiveChart({ ...data.candle, symbol: data.symbol });
       const ticker = data.ticker || {};
@@ -247,7 +305,17 @@ function connectWS() {
 }
 
 $('#symbol-search').oninput = renderWatchlist;
-$('#mobile-symbol-select').onchange = (event) => selectSymbol(event.target.value);
+$('#mobile-symbol-trigger').onclick = () => setMobileSymbolMenu(!state.symbolMenuOpen);
+$('#mobile-symbol-menu').onclick = (event) => {
+  const option = event.target.closest('.mobile-symbol-option');
+  if (!option) return;
+  setMobileSymbolMenu(false);
+  selectSymbol(option.dataset.symbol);
+};
+document.addEventListener('click', (event) => {
+  const picker = $('#mobile-symbol-picker');
+  if (state.symbolMenuOpen && picker && !picker.contains(event.target)) setMobileSymbolMenu(false);
+});
 $('#refresh-btn').onclick = () => { loadOverview(); loadTrades(); };
 $('#zoom-in').title = 'تكبير الشارت: عرض شموع أقل بتفاصيل أكبر';
 $('#zoom-out').title = 'إبعاد الشارت: عرض شموع أكثر';
