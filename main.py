@@ -153,15 +153,22 @@ async def _manage_open_trades():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await store.check_persistent_storage()
     await market.start()
-    auto_task = asyncio.create_task(_auto_signal_loop())
+    auto_task = None
+    if store.has_persistent_storage:
+        auto_task = asyncio.create_task(_auto_signal_loop())
+    else:
+        log.error("automatic signal loop disabled: persistent Supabase storage is unavailable or not configured; backend=%s", store.backend_name)
     exit_task = asyncio.create_task(_manage_open_trades())
     try:
         yield
     finally:
-        auto_task.cancel()
+        if auto_task:
+            auto_task.cancel()
         exit_task.cancel()
-        await asyncio.gather(auto_task, exit_task, return_exceptions=True)
+        tasks = [exit_task] + ([auto_task] if auto_task else [])
+        await asyncio.gather(*tasks, return_exceptions=True)
         await market.stop()
 
 app = FastAPI(title="Weeg Crypto Trading Intelligence", version="1.0.0", lifespan=lifespan)
@@ -172,7 +179,19 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def index(): return FileResponse(Path("templates/index.html"))
 
 @app.get("/api/health")
-async def health(): return {"status": "ok", "service": "weeg", "symbols": len(settings.symbol_list), "live_feed": market._task is not None, "auto_signal_storage": True}
+async def health():
+    persistent = store.has_persistent_storage
+    return {
+        "status": "ok",
+        "service": "weeg",
+        "symbols": len(settings.symbol_list),
+        "live_feed": market._task is not None,
+        "storage_backend": store.backend_name,
+        "persistent_storage": persistent,
+        "auto_signal_enabled": persistent,
+        "auto_signal_storage": persistent,
+        "warning": None if persistent else "التخزين الدائم غير جاهز؛ لن تُنشأ صفقات آلية حتى لا تضيع عند إعادة تشغيل Render",
+    }
 
 @app.get("/api/market/candles")
 async def candles(symbol: str = "BTCUSDT", interval: str = "15m", limit: int = 250):

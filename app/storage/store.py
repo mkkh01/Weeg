@@ -8,12 +8,38 @@ class Store:
     def __init__(self, db_path: str, supabase_url: str | None = None, supabase_key: str | None = None, redis_url: str | None = None):
         self.db_path, self.supabase_url, self.supabase_key, self.redis_url = db_path, supabase_url, supabase_key, redis_url
         self._init_sqlite()
+        self.persistent_storage_ready = False
         self.redis = None
         if redis_url:
             try:
                 import redis.asyncio as redis
                 self.redis = redis.from_url(redis_url, decode_responses=True)
             except Exception: self.redis = None
+
+    @property
+    def persistent_storage_configured(self) -> bool:
+        return bool(self.supabase_url and self.supabase_key)
+
+    @property
+    def has_persistent_storage(self) -> bool:
+        return self.persistent_storage_ready
+
+    @property
+    def backend_name(self) -> str:
+        if self.persistent_storage_ready:
+            return "supabase"
+        return "sqlite_ephemeral" if not self.persistent_storage_configured else "supabase_unavailable"
+
+    async def check_persistent_storage(self) -> bool:
+        if not self.persistent_storage_configured:
+            self.persistent_storage_ready = False
+            return False
+        try:
+            await self._supabase("weeg_trades", params={"select": "id", "limit": "1"})
+            self.persistent_storage_ready = True
+        except Exception:
+            self.persistent_storage_ready = False
+        return self.persistent_storage_ready
 
     def _init_sqlite(self):
         with sqlite3.connect(self.db_path) as db:
@@ -89,20 +115,20 @@ class Store:
 
     async def create_trade(self, trade: dict[str, Any]) -> dict[str, Any]:
         trade = {**trade, "created_at": datetime.now(timezone.utc).isoformat()}
-        try:
+        if self.persistent_storage_configured:
             remote = await self._supabase("weeg_trades", method="POST", data=trade)
-            if remote: return remote[0]
-        except Exception: pass
+            if not remote:
+                raise RuntimeError("Supabase لم يُرجع الصفقة بعد الحفظ")
+            return remote[0]
         with sqlite3.connect(self.db_path) as db:
             db.execute("insert or replace into trades(id,payload,status,created_at) values(?,?,?,?)", (trade["id"], json.dumps(trade), trade.get("status", "OPEN"), trade["created_at"]))
             db.commit()
         return trade
 
     async def update_trade(self, trade_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        try:
+        if self.persistent_storage_configured:
             remote = await self._supabase("weeg_trades", method="PATCH", params={"id": f"eq.{trade_id}"}, data=patch)
-            if remote: return remote[0]
-        except Exception: pass
+            return remote[0] if remote else None
         with sqlite3.connect(self.db_path) as db:
             row = db.execute("select payload from trades where id=?", (trade_id,)).fetchone()
             if not row: return None
