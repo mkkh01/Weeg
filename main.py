@@ -78,27 +78,41 @@ async def _analyze_mtf(symbol: str) -> dict:
     }
     entry = results["15m"]
     entry_signal = entry.get("signal")
-    context_bias = results["4h"].get("bias", "NEUTRAL")
-    trend_bias = results["1h"].get("bias", "NEUTRAL")
+    timeframe_signals = {interval: results[interval].get("signal") for interval in MTF_INTERVALS}
+    timeframe_ready = {interval: bool(results[interval].get("ready")) for interval in MTF_INTERVALS}
     vetoes = []
-    if entry_signal in ("LONG", "SHORT"):
-        if context_bias == _opposite(entry_signal):
-            vetoes.append(f"تعارض 4h: {context_bias}")
-        if trend_bias == _opposite(entry_signal):
-            vetoes.append(f"تعارض 1h: {trend_bias}")
+    if entry_signal not in ("LONG", "SHORT"):
+        vetoes.append("إشارة 15m ليست LONG أو SHORT")
+    else:
+        for interval in MTF_INTERVALS:
+            signal = timeframe_signals[interval]
+            if signal != entry_signal:
+                vetoes.append(f"عدم توافق {interval}: {signal} مقابل {entry_signal}")
+            if not timeframe_ready[interval]:
+                vetoes.append(f"الفريم {interval} غير جاهز")
+
+    fully_aligned = (
+        entry_signal in ("LONG", "SHORT")
+        and all(timeframe_signals[interval] == entry_signal for interval in MTF_INTERVALS)
+        and all(timeframe_ready.values())
+    )
     entry = {
         **entry,
         "timeframes": {
             interval: {key: result.get(key) for key in ("signal", "bias", "confidence", "structure", "regime", "ready")}
             for interval, result in results.items()
         },
-        "mtf_alignment": "VETO" if vetoes else "ALIGNED_OR_NEUTRAL",
+        "mtf_alignment": "ALIGNED" if fully_aligned else "VETO",
         "mtf_vetoes": vetoes,
     }
-    if vetoes:
+    if not fully_aligned:
         entry["signal"] = "NO TRADE"
         entry["ready"] = False
-        entry["reasons"] = [*entry.get("reasons", []), *vetoes, "تم رفض الإشارة بسبب تعارض الفريمات الأعلى"]
+        entry["reasons"] = [
+            *entry.get("reasons", []),
+            *vetoes,
+            "تم رفض الإشارة: يجب تطابق اتجاه 4h و1h و15m وجاهزية الفريمات الثلاثة",
+        ]
     return entry
 
 
@@ -138,6 +152,9 @@ async def _scan_and_store_auto_signals() -> list[dict]:
                 "auto_created": True,
                 "asset_profile": result.get("asset_profile"),
                 "signal_reasons": result.get("reasons", []),
+                "mtf_alignment": result.get("mtf_alignment"),
+                "mtf_vetoes": result.get("mtf_vetoes", []),
+                "mtf_timeframes": result.get("timeframes", {}),
             }
             saved.append(await store.create_trade(trade))
         except Exception as exc:

@@ -14,7 +14,7 @@ class Store:
         "structure_state", "liquidity_state", "fvg_state", "volume_state", "momentum_state",
         "status", "result", "pnl", "max_favorable_excursion", "max_adverse_excursion",
         "exit_reason", "exit_price", "created_at", "closed_at", "source", "auto_created", "asset_profile",
-        "signal_reasons",
+        "signal_reasons", "mtf_alignment", "mtf_vetoes", "mtf_timeframes",
     }
     PG_UPDATE_FIELDS = PG_TRADE_FIELDS - {"id", "created_at"}
 
@@ -273,7 +273,7 @@ class Store:
 
     @staticmethod
     def _pg_value(field: str, value: Any) -> Any:
-        if field == "signal_reasons":
+        if field in {"signal_reasons", "mtf_vetoes", "mtf_timeframes"}:
             try:
                 from psycopg.types.json import Jsonb
                 return Jsonb(value if value is not None else [])
