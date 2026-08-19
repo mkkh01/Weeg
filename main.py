@@ -14,11 +14,13 @@ from app.analysis.engine import analyze
 from app.analysis.backtest import run_backtest
 from app.storage.store import Store
 from app.notifications import PushNotifier
+from app.telegram import TelegramNotifier
 
 settings = get_settings()
-market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["1m", "15m", "1h", "4h"])
+market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["15m", "1h", "4h"])
 store = Store(settings.database_path, settings.supabase_http_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
 push_notifier = PushNotifier(store, settings.vapid_private_key, settings.vapid_subject)
+telegram_notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
 log = logging.getLogger("weeg.auto_signals")
 push_log = logging.getLogger("weeg.push")
 AUTO_SCAN_SECONDS = 60
@@ -172,6 +174,7 @@ async def _scan_and_store_auto_signals() -> list[dict]:
             saved_trade = await store.create_trade(trade)
             saved.append(saved_trade)
             asyncio.create_task(_notify_trade_opened(saved_trade))
+            asyncio.create_task(_notify_telegram_trade_opened(saved_trade))
         except Exception as exc:
             log.warning("auto signal scan failed for %s: %s", symbol, exc)
     return saved
@@ -193,6 +196,18 @@ async def _notify_trade_closed(trade: dict) -> None:
             push_log.info("trade-close notification: %s", result)
     except Exception:
         push_log.exception("trade-close notification failed")
+
+
+async def _notify_telegram_trade_opened(trade: dict) -> None:
+    result = await telegram_notifier.trade_opened(trade)
+    if result["sent"] or result["failed"]:
+        log.info("telegram trade-open notification: %s", result)
+
+
+async def _notify_telegram_trade_closed(trade: dict) -> None:
+    result = await telegram_notifier.trade_closed(trade)
+    if result["sent"] or result["failed"]:
+        log.info("telegram trade-close notification: %s", result)
 
 
 async def _auto_signal_loop():
@@ -291,6 +306,7 @@ async def _manage_open_trades():
                 if updated:
                     log.info("trade %s closed at %s: %s price=%s", trade.get("id"), symbol, patch["exit_reason"], price)
                     asyncio.create_task(_notify_trade_closed(updated))
+                    asyncio.create_task(_notify_telegram_trade_closed(updated))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -371,6 +387,7 @@ async def health(response: Response):
         "persistent_storage": persistent,
         "storage_last_error": store.storage_last_error,
         "storage_last_check_at": store.storage_last_check_at,
+        "telegram_notifications_enabled": telegram_notifier.configured,
         "auto_signal_enabled": persistent,
         "auto_signal_storage": persistent,
         "warning": None if persistent else "التخزين الدائم غير جاهز؛ الفحص الآلي ينتظر اتصال Supabase ولن يحفظ صفقات في SQLite المؤقت",

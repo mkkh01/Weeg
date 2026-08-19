@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     database_path: str = "weeg.db"
     vapid_private_key: str | None = None
     vapid_subject: str = "mailto:weeg-notifications@example.com"
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
 
     @property
     def postgres_dsn(self) -> str | None:

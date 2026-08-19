@@ -299,10 +299,7 @@ async function selectSymbol(symbol) {
   if (active) renderSignal(active);
   state.activeLoading = true;
   try {
-    const [signal] = await Promise.all([
-      api(`/api/signals/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}`),
-      loadChart(requestId)
-    ]);
+    const signal = await api(`/api/signals/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}`);
     if (requestId !== state.requestId) return;
     renderSignal({ ...signal, ticker: activeOverviewItem()?.ticker });
     $('#last-update').textContent = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
@@ -340,10 +337,7 @@ async function refreshActive() {
   const requestId = ++state.requestId;
   state.activeLoading = true;
   try {
-    const [signal] = await Promise.all([
-      api(`/api/signals/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}`),
-      loadChart(requestId)
-    ]);
+    const signal = await api(`/api/signals/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}`);
     if (requestId !== state.requestId) return;
     renderSignal({ ...signal, ticker: activeOverviewItem()?.ticker });
     renderWatchlist();
@@ -503,13 +497,20 @@ document.addEventListener('click', (event) => {
   const picker = $('#mobile-symbol-picker');
   if (state.symbolMenuOpen && picker && !picker.contains(event.target)) setMobileSymbolMenu(false);
 });
-$('#refresh-btn').onclick = () => { loadOverview(); loadTrades(); loadCycleSummary(); };
-$('#zoom-in').title = 'تكبير الشارت: عرض شموع أقل بتفاصيل أكبر';
-$('#zoom-out').title = 'إبعاد الشارت: عرض شموع أكثر';
-$('#fit-chart').title = 'ملاءمة كامل البيانات';
-$('#zoom-in').onclick = () => state.chart.timeScale().scrollToPosition(5, true);
-$('#zoom-out').onclick = () => state.chart.timeScale().scrollToPosition(-5, true);
-$('#fit-chart').onclick = () => state.chart.timeScale().fitContent();
+$('#refresh-btn').onclick = async () => {
+  await loadOverview();
+  await loadTrades(document.querySelector('.trade-tabs button.active')?.dataset.status || 'open');
+  await loadCycleSummary();
+  toast('تم تحديث بيانات اللوحة عند الطلب');
+};
+$('#price-btn').onclick = () => refreshActive();
+$('#cycle-refresh-btn').onclick = () => loadCycleSummary();
+$('#system-refresh-btn').onclick = async () => {
+  await loadCycleSummary();
+  const health = await api(`/api/health?manual=${Date.now()}`);
+  toast(health.status === 'ok' ? 'حالة النظام سليمة' : 'توجد مشكلة في حالة النظام');
+};
+
 $('#add-symbol').onclick = () => toast('يمكن تتبع أي زوج موجود في قائمة SYMBOLS من إعدادات Render');
 $('#settings-btn').onclick = () => toast('الإعدادات تحفظ عبر Supabase عند توفير SUPABASE_URL وSUPABASE_KEY');
 $('#explain-btn').onclick = () => toast((state.signal?.reasons || []).join(' · ') || 'لا يوجد تفسير متاح');
@@ -528,23 +529,10 @@ $$('.trade-tabs button').forEach((button) => button.onclick = () => {
 });
 
 $$('.chart-toolbar input[data-layer]').forEach((input) => input.onchange = () => toast(`طبقة ${input.parentElement.textContent.trim()} ${input.checked ? 'مفعلة' : 'متوقفة'} — ستظهر التفاصيل مع الإشارات القادمة`));
-$$('.chart-toolbar .tool').forEach((button) => button.onclick = () => {
-  $$('.chart-toolbar .tool').forEach((element) => element.classList.remove('active'));
-  button.classList.add('active');
-  const lineMode = button.textContent.trim() === 'خط';
-  state.candleSeries.applyOptions({ visible: !lineMode });
-  state.lineSeries.applyOptions({ visible: lineMode });
-});
 
 (async () => {
-  initChart();
   initPushNotifications();
-  connectWS();
   await loadOverview();
   await loadTrades();
   await loadCycleSummary();
-  state.refreshTimer = setInterval(() => { refreshActive(); loadTrades(); }, 30000);
-  setInterval(loadOverview, 60000);
-  setInterval(loadCycleState, 1000);
-  setInterval(loadCycleSummary, 15000);
 })();

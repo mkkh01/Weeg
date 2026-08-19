@@ -5,3 +5,5 @@
 @media(max-width:600px){.cycle-summary{margin:10px 0;padding:13px}.cycle-grid{gap:7px}.cycle-grid>div{padding:9px}.cycle-grid strong{font-size:12px}.cycle-note{font-size:11px}}
 .trade-result{font-weight:700;white-space:nowrap}.trade-result.positive{color:var(--green)}.trade-result.negative{color:var(--red)}.trade-result.neutral{color:var(--muted)}
 #push-btn.push-enabled{color:var(--green);border-color:rgba(51,214,154,.35)}#push-btn:disabled{opacity:.65;cursor:not-allowed}@media(max-width:600px){.top-actions{gap:5px}.top-actions button{padding:8px 9px;font-size:11px}#push-btn{max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+
+.on-demand-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-start}.on-demand-actions button{font-size:11px;padding:7px 10px}.on-demand-panel{margin:14px 0;padding:16px 18px}.on-demand-copy{color:var(--muted);font-size:12px;padding:4px 0}.trade-tabs button{white-space:nowrap}@media(max-width:700px){.on-demand-actions{width:100%;justify-content:stretch}.on-demand-actions button{flex:1;min-width:0}.instrument-bar{align-items:flex-start}}
