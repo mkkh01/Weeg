@@ -21,6 +21,17 @@ log = logging.getLogger("weeg.auto_signals")
 AUTO_SCAN_SECONDS = 60
 STORAGE_RETRY_SECONDS = 30
 EXIT_SCAN_SECONDS = 5
+cycle_state = {
+    "status": "STARTING",
+    "started_at": None,
+    "finished_at": None,
+    "next_run_at": None,
+    "scanned_symbols": 0,
+    "ready_signals": 0,
+    "saved_trades": 0,
+    "last_saved_symbols": [],
+    "last_error": None,
+}
 
 class TradeInput(BaseModel):
     symbol: str
@@ -47,12 +58,15 @@ class SettingsInput(BaseModel):
 
 async def _scan_and_store_auto_signals() -> list[dict]:
     saved = []
+    ready_signals = 0
     for symbol in settings.symbol_list:
         try:
             rows = await market.ensure_history(symbol, settings.default_interval)
             result = analyze(symbol, rows, settings.default_interval, settings.confidence_threshold, settings.minimum_rr)
             if not result.get("ready") or result.get("signal") not in ("LONG", "SHORT"):
                 continue
+            ready_signals += 1
+            cycle_state["ready_signals"] = ready_signals
             existing = await store.find_open_auto_trade(symbol, settings.default_interval)
             if existing:
                 continue
@@ -87,22 +101,43 @@ async def _scan_and_store_auto_signals() -> list[dict]:
 
 async def _auto_signal_loop():
     while True:
+        cycle_started = datetime.now(timezone.utc)
+        cycle_state.update({
+            "status": "CHECKING",
+            "started_at": cycle_started.isoformat(),
+            "finished_at": None,
+            "scanned_symbols": 0,
+            "ready_signals": 0,
+            "saved_trades": 0,
+            "last_saved_symbols": [],
+            "last_error": None,
+        })
         try:
             if not store.has_persistent_storage:
                 await store.check_persistent_storage()
             if store.has_persistent_storage:
+                cycle_state["scanned_symbols"] = len(settings.symbol_list)
                 saved = await _scan_and_store_auto_signals()
+                cycle_state["saved_trades"] = len(saved)
+                cycle_state["last_saved_symbols"] = [trade.get("symbol") for trade in saved]
                 if saved:
                     log.info("saved %d automatic paper signal(s)", len(saved))
                 delay = AUTO_SCAN_SECONDS
+                cycle_state["status"] = "IDLE"
             else:
                 log.warning("automatic signal scan paused: backend=%s error=%s", store.backend_name, store.storage_last_error)
                 delay = STORAGE_RETRY_SECONDS
+                cycle_state["status"] = "WAITING_STORAGE"
+                cycle_state["last_error"] = store.storage_last_error
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log.warning("automatic signal loop failed: %s", exc)
             delay = STORAGE_RETRY_SECONDS
+            cycle_state["status"] = "ERROR"
+            cycle_state["last_error"] = type(exc).__name__
+        cycle_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+        cycle_state["next_run_at"] = (datetime.now(timezone.utc).timestamp() + delay)
         await asyncio.sleep(delay)
 
 
@@ -207,6 +242,34 @@ async def health():
         "auto_signal_enabled": persistent,
         "auto_signal_storage": persistent,
         "warning": None if persistent else "التخزين الدائم غير جاهز؛ الفحص الآلي ينتظر اتصال Supabase ولن يحفظ صفقات في SQLite المؤقت",
+    }
+
+@app.get("/api/summary/cycle")
+async def summary_cycle():
+    open_trades = await store.list_active_trades() if store.has_persistent_storage else []
+    closed_trades = await store.list_trades("CLOSED") if store.has_persistent_storage else []
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cycle": cycle_state,
+        "health": {
+            "storage_backend": store.backend_name,
+            "persistent_storage": store.has_persistent_storage,
+            "auto_signal_enabled": store.has_persistent_storage,
+            "live_feed": market._task is not None,
+            "storage_last_error": store.storage_last_error,
+        },
+        "trades": {
+            "open": len(open_trades),
+            "closed": len(closed_trades),
+            "latest_open": [trade.get("symbol") for trade in open_trades[:5]],
+        },
+        "configuration": {
+            "symbols": len(settings.symbol_list),
+            "interval": settings.default_interval,
+            "scan_seconds": AUTO_SCAN_SECONDS,
+            "confidence_threshold": settings.confidence_threshold,
+            "minimum_rr": settings.minimum_rr,
+        },
     }
 
 @app.get("/api/market/candles")

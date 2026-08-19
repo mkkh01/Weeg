@@ -256,6 +256,45 @@ async function refreshActive() {
   }
 }
 
+function cycleTime(value) {
+  if (!value) return '—';
+  const numeric = Number(value);
+  const date = Number.isFinite(numeric) && numeric < 100000000000 ? new Date(numeric * 1000) : new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function loadCycleSummary() {
+  try {
+    const data = await api('/api/summary/cycle');
+    const cycle = data.cycle || {};
+    const health = data.health || {};
+    const trades = data.trades || {};
+    const statusLabels = { CHECKING: 'يفحص الآن', IDLE: 'جاهز للدورة التالية', WAITING_STORAGE: 'ينتظر التخزين', ERROR: 'خطأ في الدورة', STARTING: 'يبدأ' };
+    const status = cycle.status || 'STARTING';
+    const statusEl = $('#cycle-status');
+    statusEl.textContent = statusLabels[status] || status;
+    statusEl.className = `cycle-status ${status === 'IDLE' ? 'positive' : status === 'ERROR' || status === 'WAITING_STORAGE' ? 'negative' : 'neutral'}`;
+    $('#cycle-storage').textContent = health.persistent_storage ? 'PostgreSQL متصل' : 'غير جاهز';
+    $('#cycle-auto').textContent = health.auto_signal_enabled ? 'مفعّل' : 'متوقف';
+    $('#cycle-scanned').textContent = cycle.scanned_symbols ? `${cycle.scanned_symbols} عملة` : '—';
+    $('#cycle-ready').textContent = `${cycle.ready_signals || 0}`;
+    $('#cycle-open').textContent = `${trades.open || 0}`;
+    $('#cycle-closed').textContent = `${trades.closed || 0}`;
+    $('#cycle-saved').textContent = cycle.saved_trades ? `${cycle.saved_trades} · ${(cycle.last_saved_symbols || []).join(', ')}` : 'لا جديد';
+    $('#cycle-next').textContent = cycleTime(cycle.next_run_at);
+    const error = cycle.last_error || health.storage_last_error;
+    $('#cycle-note').textContent = error
+      ? `تنبيه: ${error}`
+      : `آخر دورة: ${cycleTime(cycle.finished_at)} · الصفقات المفتوحة: ${(trades.latest_open || []).join('، ') || 'لا توجد'}`;
+  } catch (error) {
+    const statusEl = $('#cycle-status');
+    if (statusEl) {
+      statusEl.textContent = 'تعذر التحديث';
+      statusEl.className = 'cycle-status negative';
+    }
+  }
+}
+
 async function loadTrades(status = 'open') {
   try {
     const rows = await api(`/api/trades?status=${status === 'open' ? 'OPEN' : 'CLOSED'}`);
@@ -316,7 +355,7 @@ document.addEventListener('click', (event) => {
   const picker = $('#mobile-symbol-picker');
   if (state.symbolMenuOpen && picker && !picker.contains(event.target)) setMobileSymbolMenu(false);
 });
-$('#refresh-btn').onclick = () => { loadOverview(); loadTrades(); };
+$('#refresh-btn').onclick = () => { loadOverview(); loadTrades(); loadCycleSummary(); };
 $('#zoom-in').title = 'تكبير الشارت: عرض شموع أقل بتفاصيل أكبر';
 $('#zoom-out').title = 'إبعاد الشارت: عرض شموع أكثر';
 $('#fit-chart').title = 'ملاءمة كامل البيانات';
@@ -354,6 +393,8 @@ $$('.chart-toolbar .tool').forEach((button) => button.onclick = () => {
   connectWS();
   await loadOverview();
   await loadTrades();
+  await loadCycleSummary();
   state.refreshTimer = setInterval(() => { refreshActive(); loadTrades(); }, 30000);
   setInterval(loadOverview, 60000);
+  setInterval(loadCycleSummary, 15000);
 })();
