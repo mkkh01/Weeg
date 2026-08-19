@@ -323,6 +323,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 async def index(): return FileResponse(Path("templates/index.html"))
 
+
+@app.get("/push-sw.js")
+async def push_service_worker():
+    return FileResponse(
+        Path("static/push-sw.js"),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
 @app.get("/api/push/config")
 async def push_config():
     return {"enabled": push_notifier.configured, "public_key": push_notifier.public_key}

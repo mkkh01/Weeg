@@ -117,7 +117,11 @@ async function initPushNotifications() {
       pushButton('Push غير مهيأ', false, true);
       return;
     }
-    state.pushRegistration = await navigator.serviceWorker.register('/static/push-sw.js', { scope: '/' });
+    const legacyRegistrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(legacyRegistrations
+      .filter((registration) => registration.active?.scriptURL.includes('/static/push-sw.js'))
+      .map((registration) => registration.unregister()));
+    state.pushRegistration = await navigator.serviceWorker.register('/push-sw.js', { scope: '/' });
     const existing = await state.pushRegistration.pushManager.getSubscription();
     if (existing && Notification.permission === 'granted') {
       await syncPushSubscription(existing);
