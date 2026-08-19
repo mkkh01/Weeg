@@ -31,6 +31,7 @@ cycle_state = {
     "saved_trades": 0,
     "last_saved_symbols": [],
     "last_error": None,
+    "completed_cycles": 0,
 }
 
 class TradeInput(BaseModel):
@@ -120,6 +121,7 @@ async def _auto_signal_loop():
                 saved = await _scan_and_store_auto_signals()
                 cycle_state["saved_trades"] = len(saved)
                 cycle_state["last_saved_symbols"] = [trade.get("symbol") for trade in saved]
+                cycle_state["completed_cycles"] += 1
                 if saved:
                     log.info("saved %d automatic paper signal(s)", len(saved))
                 delay = AUTO_SCAN_SECONDS
@@ -246,11 +248,29 @@ async def health():
 
 @app.get("/api/summary/cycle")
 async def summary_cycle():
-    open_trades = await store.list_active_trades() if store.has_persistent_storage else []
-    closed_trades = await store.list_trades("CLOSED") if store.has_persistent_storage else []
+    warnings = []
+    open_trades = []
+    closed_trades = []
+    if store.has_persistent_storage:
+        results = await asyncio.gather(
+            store.list_active_trades(),
+            store.list_trades("CLOSED"),
+            return_exceptions=True,
+        )
+        if isinstance(results[0], Exception):
+            warnings.append(f"open_trades:{type(results[0]).__name__}")
+        else:
+            open_trades = results[0]
+        if isinstance(results[1], Exception):
+            warnings.append(f"closed_trades:{type(results[1]).__name__}")
+        else:
+            closed_trades = results[1]
+    else:
+        warnings.append("persistent_storage_unavailable")
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "cycle": cycle_state,
+        "warnings": warnings,
         "health": {
             "storage_backend": store.backend_name,
             "persistent_storage": store.has_persistent_storage,

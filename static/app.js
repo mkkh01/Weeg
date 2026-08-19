@@ -12,7 +12,8 @@ const state = {
   activeLoading: false,
   refreshTimer: null,
   liveBar: null,
-  symbolMenuOpen: false
+  symbolMenuOpen: false,
+  lastCycleSummary: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -280,17 +281,26 @@ async function loadCycleSummary() {
     $('#cycle-ready').textContent = `${cycle.ready_signals || 0}`;
     $('#cycle-open').textContent = `${trades.open || 0}`;
     $('#cycle-closed').textContent = `${trades.closed || 0}`;
+    $('#cycle-count').textContent = `${cycle.completed_cycles || 0}`;
     $('#cycle-saved').textContent = cycle.saved_trades ? `${cycle.saved_trades} · ${(cycle.last_saved_symbols || []).join(', ')}` : 'لا جديد';
     $('#cycle-next').textContent = cycleTime(cycle.next_run_at);
     const error = cycle.last_error || health.storage_last_error;
-    $('#cycle-note').textContent = error
-      ? `تنبيه: ${error}`
+    const warnings = (data.warnings || []).join('، ');
+    $('#cycle-note').textContent = error || warnings
+      ? `تنبيه: ${error || warnings}`
       : `آخر دورة: ${cycleTime(cycle.finished_at)} · الصفقات المفتوحة: ${(trades.latest_open || []).join('، ') || 'لا توجد'}`;
+    state.lastCycleSummary = data;
   } catch (error) {
     const statusEl = $('#cycle-status');
-    if (statusEl) {
-      statusEl.textContent = 'تعذر التحديث';
-      statusEl.className = 'cycle-status negative';
+    const note = $('#cycle-note');
+    if (state.lastCycleSummary) {
+      statusEl.textContent = 'إعادة المحاولة';
+      statusEl.className = 'cycle-status neutral';
+      note.textContent = `تعذر تحديث الملخص مؤقتًا؛ آخر دورة ناجحة: ${cycleTime(state.lastCycleSummary.cycle?.finished_at)}`;
+    } else {
+      statusEl.textContent = 'في انتظار أول تحديث';
+      statusEl.className = 'cycle-status neutral';
+      note.textContent = 'سيُعاد الاتصال تلقائيًا';
     }
   }
 }
