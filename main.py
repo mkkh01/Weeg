@@ -16,7 +16,7 @@ from app.storage.store import Store
 
 settings = get_settings()
 market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list)
-store = Store(settings.database_path, settings.supabase_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
+store = Store(settings.database_path, settings.supabase_http_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
 log = logging.getLogger("weeg.auto_signals")
 AUTO_SCAN_SECONDS = 60
 STORAGE_RETRY_SECONDS = 30
@@ -196,7 +196,7 @@ async def health():
         "storage_backend": store.backend_name,
         "postgres_configured": store.postgres_configured,
         "database_url_configured": bool(settings.postgres_dsn),
-        "supabase_url_configured": bool(settings.supabase_url),
+        "supabase_url_configured": bool(settings.supabase_http_url),
         "supabase_key_configured": bool(settings.supabase_auth_keys),
         "supabase_key_count": store.supabase_key_count,
         "supabase_key_source": store.storage_key_source,

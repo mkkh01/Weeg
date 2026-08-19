@@ -29,7 +29,19 @@ class Settings(BaseSettings):
 
     @property
     def postgres_dsn(self) -> str | None:
-        return self.database_url or self.supabase_db_url
+        if self.database_url:
+            return self.database_url
+        if self.supabase_db_url:
+            return self.supabase_db_url
+        if self.supabase_url and self.supabase_url.lower().startswith(("postgres://", "postgresql://")):
+            return self.supabase_url
+        return None
+
+    @property
+    def supabase_http_url(self) -> str:
+        if self.supabase_url and self.supabase_url.lower().startswith(("http://", "https://")):
+            return self.supabase_url
+        return "https://ymjancsrnmunkyaomdsx.supabase.co"
 
     @property
     def supabase_auth_keys(self) -> list[str]:

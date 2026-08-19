@@ -27,6 +27,12 @@ class StorageConfigTests(unittest.TestCase):
             self.assertFalse(store.has_persistent_storage)
             self.assertEqual(store.backend_name, "sqlite_ephemeral")
 
+    def test_postgres_url_can_be_read_from_supabase_url_legacy_field(self):
+        from app.config import Settings
+        settings = Settings(supabase_url="postgresql://postgres.example/postgres")
+        self.assertEqual(settings.postgres_dsn, "postgresql://postgres.example/postgres")
+        self.assertTrue(settings.supabase_http_url.startswith("https://"))
+
 
 if __name__ == "__main__":
     unittest.main()
