@@ -154,7 +154,10 @@ function renderSignal(item) {
   $('#active-change').className = Number(ticker.change || 0) >= 0 ? 'positive' : 'negative';
   const color = signal === 'LONG' ? 'positive' : signal === 'SHORT' ? 'negative' : 'neutral';
   const context = [item.asset_profile_label, item.regime].filter(Boolean).join(' · ') || 'TRANSITION';
-  $('#signal-content').innerHTML = `<div class="signal-main"><div><span class="eyebrow">${context}</span><div class="signal-word ${color}">${signal}</div></div><div><span class="eyebrow">CONFIDENCE</span><div class="confidence">${item.confidence || 0}</div></div></div><div class="reasons">${(item.reasons || [item.reason || 'لا توجد أسباب كافية']).map((reason) => `<span class="reason">✓ ${reason}</span>`).join('')}</div><div class="levels"><div class="level"><small>ENTRY</small><strong>${fmt(item.entry)}</strong></div><div class="level"><small>STOP LOSS</small><strong class="negative">${fmt(item.stop_loss)}</strong></div><div class="level"><small>TP1</small><strong class="positive">${fmt(item.take_profit_1)}</strong></div><div class="level"><small>TP2</small><strong class="positive">${fmt(item.take_profit_2)}</strong></div></div>`;
+  const timeframeSummary = item.timeframes
+    ? Object.entries(item.timeframes).map(([interval, frame]) => `<span class="reason">${interval}: ${frame.bias || frame.signal || 'NEUTRAL'}</span>`).join('')
+    : '';
+  $('#signal-content').innerHTML = `<div class="signal-main"><div><span class="eyebrow">${context}</span><div class="signal-word ${color}">${signal}</div></div><div><span class="eyebrow">CONFIDENCE</span><div class="confidence">${item.confidence || 0}</div></div></div><div class="reasons">${timeframeSummary}${(item.reasons || [item.reason || 'لا توجد أسباب كافية']).map((reason) => `<span class="reason">✓ ${reason}</span>`).join('')}</div><div class="levels"><div class="level"><small>ENTRY</small><strong>${fmt(item.entry)}</strong></div><div class="level"><small>STOP LOSS</small><strong class="negative">${fmt(item.stop_loss)}</strong></div><div class="level"><small>TP1</small><strong class="positive">${fmt(item.take_profit_1)}</strong></div><div class="level"><small>TP2</small><strong class="positive">${fmt(item.take_profit_2)}</strong></div></div>`;
 }
 
 function updateLiveChart(candle) {

@@ -15,7 +15,7 @@ from app.analysis.backtest import run_backtest
 from app.storage.store import Store
 
 settings = get_settings()
-market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval)
+market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["1m", "15m", "1h", "4h"])
 store = Store(settings.database_path, settings.supabase_http_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
 log = logging.getLogger("weeg.auto_signals")
 AUTO_SCAN_SECONDS = 60
@@ -58,13 +58,56 @@ class SettingsInput(BaseModel):
     minimum_rr: float | None = None
     risk_per_trade: float | None = None
 
+MTF_INTERVALS = ("4h", "1h", "15m")
+
+
+def _opposite(direction: str) -> str:
+    return "SHORT" if direction == "LONG" else "LONG"
+
+
+async def _analyze_mtf(symbol: str) -> dict:
+    rows_4h, rows_1h, rows_15m = await asyncio.gather(
+        market.ensure_history(symbol, "4h"),
+        market.ensure_history(symbol, "1h"),
+        market.ensure_history(symbol, "15m"),
+    )
+    results = {
+        "4h": analyze(symbol, rows_4h, "4h", settings.confidence_threshold, settings.minimum_rr),
+        "1h": analyze(symbol, rows_1h, "1h", settings.confidence_threshold, settings.minimum_rr),
+        "15m": analyze(symbol, rows_15m, "15m", settings.confidence_threshold, settings.minimum_rr),
+    }
+    entry = results["15m"]
+    entry_signal = entry.get("signal")
+    context_bias = results["4h"].get("bias", "NEUTRAL")
+    trend_bias = results["1h"].get("bias", "NEUTRAL")
+    vetoes = []
+    if entry_signal in ("LONG", "SHORT"):
+        if context_bias == _opposite(entry_signal):
+            vetoes.append(f"تعارض 4h: {context_bias}")
+        if trend_bias == _opposite(entry_signal):
+            vetoes.append(f"تعارض 1h: {trend_bias}")
+    entry = {
+        **entry,
+        "timeframes": {
+            interval: {key: result.get(key) for key in ("signal", "bias", "confidence", "structure", "regime", "ready")}
+            for interval, result in results.items()
+        },
+        "mtf_alignment": "VETO" if vetoes else "ALIGNED_OR_NEUTRAL",
+        "mtf_vetoes": vetoes,
+    }
+    if vetoes:
+        entry["signal"] = "NO TRADE"
+        entry["ready"] = False
+        entry["reasons"] = [*entry.get("reasons", []), *vetoes, "تم رفض الإشارة بسبب تعارض الفريمات الأعلى"]
+    return entry
+
+
 async def _scan_and_store_auto_signals() -> list[dict]:
     saved = []
     ready_signals = 0
     for symbol in settings.symbol_list:
         try:
-            rows = await market.ensure_history(symbol, settings.default_interval)
-            result = analyze(symbol, rows, settings.default_interval, settings.confidence_threshold, settings.minimum_rr)
+            result = await _analyze_mtf(symbol)
             if not result.get("ready") or result.get("signal") not in ("LONG", "SHORT"):
                 continue
             ready_signals += 1
@@ -304,6 +347,7 @@ async def summary_cycle():
         "configuration": {
             "symbols": len(settings.symbol_list),
             "interval": settings.default_interval,
+            "decision_timeframes": list(MTF_INTERVALS),
             "scan_seconds": AUTO_SCAN_SECONDS,
             "confidence_threshold": settings.confidence_threshold,
             "minimum_rr": settings.minimum_rr,
@@ -321,8 +365,11 @@ async def candles(symbol: str = "BTCUSDT", interval: str = "15m", limit: int = 2
 async def overview(interval: str = "15m"):
     async def one(symbol: str):
         try:
-            rows = await market.ensure_history(symbol, interval)
-            result = analyze(symbol, rows, interval, settings.confidence_threshold, settings.minimum_rr)
+            if interval == "15m":
+                result = await _analyze_mtf(symbol)
+            else:
+                rows = await market.ensure_history(symbol, interval)
+                result = analyze(symbol, rows, interval, settings.confidence_threshold, settings.minimum_rr)
             result["ticker"] = market.tickers.get(symbol, {})
             return result
         except Exception as exc:
@@ -331,7 +378,10 @@ async def overview(interval: str = "15m"):
 
 @app.get("/api/signals/{symbol}")
 async def signal(symbol: str, interval: str = "15m"):
-    symbol = symbol.upper(); rows = await market.ensure_history(symbol, interval)
+    symbol = symbol.upper()
+    if interval == "15m":
+        return await _analyze_mtf(symbol)
+    rows = await market.ensure_history(symbol, interval)
     return analyze(symbol, rows, interval, settings.confidence_threshold, settings.minimum_rr)
 
 @app.get("/api/backtest/{symbol}")

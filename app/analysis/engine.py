@@ -97,7 +97,7 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "ready": False,
     }
     if len(candles) < 30:
-        return {**base, "signal": "NO TRADE", "confidence": 0, "reason": "بيانات غير كافية"}
+        return {        **base, "signal": "NO TRADE", "bias": "NEUTRAL", "confidence": 0, "reason": "بيانات غير كافية"}
 
     closes = [float(c["close"]) for c in candles]
     current = closes[-1]
@@ -158,6 +158,7 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "regime": regime,
         "htf_trend": "BULLISH" if ema20 > ema50 else "BEARISH",
         "structure": structure,
+        "bias": direction,
         "liquidity": "SWING CLUSTERS" if swings else "UNKNOWN",
         "momentum": "CONFIRMED" if momentum_score >= 15 else "WEAK",
         "volume": "CONFIRMED" if volume_score >= 10 else "WEAK",
@@ -171,6 +172,6 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "take_profit_2": _fmt(tp2),
         "rr": round(rr, 2),
         "reasons": reasons,
-        "ready": True,
+        "ready": signal in ("LONG", "SHORT"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
