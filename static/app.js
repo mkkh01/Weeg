@@ -13,7 +13,11 @@ const state = {
   refreshTimer: null,
   liveBar: null,
   symbolMenuOpen: false,
-  lastCycleSummary: null
+  lastCycleSummary: null,
+  cycleStateLoading: false,
+  cycleSummaryLoading: false,
+  cycleStateRequestId: 0,
+  cycleSummaryRequestId: 0
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -34,7 +38,7 @@ function toast(text) {
 }
 
 async function api(url, options = {}) {
-  const response = await fetch(url, { ...options, headers: { Accept: 'application/json', ...(options.headers || {}) } });
+  const response = await fetch(url, { cache: 'no-store', ...options, headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', ...(options.headers || {}) } });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
@@ -278,8 +282,7 @@ function renderCycleState(data, includeTradeCounts = false) {
   const health = data.health || {};
   const trades = data.trades || {};
   const statusLabels = { CHECKING: 'يفحص الآن', IDLE: 'جاهز للدورة التالية', WAITING_STORAGE: 'ينتظر التخزين', ERROR: 'خطأ في الدورة', STARTING: 'يبدأ' };
-  const due = cycle.status === 'IDLE' && Number(cycle.next_run_at) <= Date.now() / 1000;
-  const status = due ? 'CHECKING' : (cycle.status || 'STARTING');
+  const status = cycle.status || 'STARTING';
   const statusEl = $('#cycle-status');
   statusEl.textContent = statusLabels[status] || status;
   statusEl.className = `cycle-status ${status === 'IDLE' ? 'positive' : status === 'ERROR' || status === 'WAITING_STORAGE' ? 'negative' : 'neutral'}`;
@@ -298,16 +301,26 @@ function renderCycleState(data, includeTradeCounts = false) {
 }
 
 async function loadCycleState() {
+  if (state.cycleStateLoading) return;
+  const requestId = ++state.cycleStateRequestId;
+  state.cycleStateLoading = true;
   try {
-    renderCycleState(await api('/api/summary/cycle/state?v=live'));
+    const data = await api(`/api/summary/cycle/state?live=${Date.now()}`);
+    if (requestId === state.cycleStateRequestId) renderCycleState(data);
   } catch (_) {
     // The full summary retains the last good values; this fast heartbeat retries automatically.
+  } finally {
+    if (requestId === state.cycleStateRequestId) state.cycleStateLoading = false;
   }
 }
 
 async function loadCycleSummary() {
+  if (state.cycleSummaryLoading) return;
+  const requestId = ++state.cycleSummaryRequestId;
+  state.cycleSummaryLoading = true;
   try {
-    const data = await api('/api/summary/cycle');
+    const data = await api(`/api/summary/cycle?summary=${Date.now()}`);
+    if (requestId !== state.cycleSummaryRequestId) return;
     const { cycle, health, trades } = renderCycleState(data, true);
     const error = cycle.last_error || health.storage_last_error;
     const warnings = (data.warnings || []).join('، ');
@@ -328,6 +341,8 @@ async function loadCycleSummary() {
       statusEl.className = 'cycle-status neutral';
       note.textContent = 'سيُعاد الاتصال تلقائيًا';
     }
+  } finally {
+    if (requestId === state.cycleSummaryRequestId) state.cycleSummaryLoading = false;
   }
 }
 

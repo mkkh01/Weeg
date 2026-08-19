@@ -3,7 +3,7 @@ import asyncio, logging, uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +33,8 @@ cycle_state = {
     "last_saved_symbols": [],
     "last_error": None,
     "completed_cycles": 0,
+    "run_id": 0,
+    "last_run_duration_seconds": None,
 }
 
 class TradeInput(BaseModel):
@@ -168,6 +170,7 @@ async def _auto_signal_loop():
         cycle_state.update({
             "status": "CHECKING",
             "started_at": cycle_started.isoformat(),
+            "run_id": cycle_state.get("run_id", 0) + 1,
             "finished_at": None,
             "scanned_symbols": 0,
             "ready_signals": 0,
@@ -201,8 +204,10 @@ async def _auto_signal_loop():
             delay = STORAGE_RETRY_SECONDS
             cycle_state["status"] = "ERROR"
             cycle_state["last_error"] = type(exc).__name__
-        cycle_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-        cycle_state["next_run_at"] = (datetime.now(timezone.utc).timestamp() + delay)
+        cycle_finished = datetime.now(timezone.utc)
+        cycle_state["finished_at"] = cycle_finished.isoformat()
+        cycle_state["last_run_duration_seconds"] = round((cycle_finished - cycle_started).total_seconds(), 3)
+        cycle_state["next_run_at"] = (cycle_finished.timestamp() + delay)
         await asyncio.sleep(delay)
 
 
@@ -287,13 +292,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def index(): return FileResponse(Path("templates/index.html"))
 
 @app.get("/api/health")
-async def health():
+async def health(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     persistent = store.has_persistent_storage
     return {
         "status": "ok",
         "service": "weeg",
         "symbols": len(settings.symbol_list),
-        "live_feed": market._task is not None,
+        **market.health_snapshot(),
         "storage_backend": store.backend_name,
         "postgres_configured": store.postgres_configured,
         "database_url_configured": bool(settings.postgres_dsn),
@@ -311,7 +317,8 @@ async def health():
     }
 
 @app.get("/api/summary/cycle/state")
-async def summary_cycle_state():
+async def summary_cycle_state(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "cycle": {**cycle_state, "ready_symbols": list(cycle_state.get("ready_symbols", []))},
@@ -319,13 +326,14 @@ async def summary_cycle_state():
             "storage_backend": store.backend_name,
             "persistent_storage": store.has_persistent_storage,
             "auto_signal_enabled": store.has_persistent_storage,
-            "live_feed": market._task is not None,
+            **market.health_snapshot(),
             "storage_last_error": store.storage_last_error,
         },
     }
 
 @app.get("/api/summary/cycle")
-async def summary_cycle():
+async def summary_cycle(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     warnings = []
     open_trades = []
     closed_trades = []
@@ -353,7 +361,7 @@ async def summary_cycle():
             "storage_backend": store.backend_name,
             "persistent_storage": store.has_persistent_storage,
             "auto_signal_enabled": store.has_persistent_storage,
-            "live_feed": market._task is not None,
+            **market.health_snapshot(),
             "storage_last_error": store.storage_last_error,
         },
         "trades": {

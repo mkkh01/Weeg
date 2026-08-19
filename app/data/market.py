@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio, json, logging, urllib.parse
+import asyncio, json, logging, time, urllib.parse
 from collections import defaultdict, deque
 from typing import Any
 import httpx
@@ -18,6 +18,11 @@ class MarketData:
         self.tickers: dict[str, dict[str, Any]] = {}
         self._task: asyncio.Task | None = None
         self._listeners: set[asyncio.Queue] = set()
+        self.last_event_at: float | None = None
+        self.last_ticker_at: dict[str, float] = {}
+        self.last_candle_at: dict[tuple[str, str], float] = {}
+        self.last_error: str | None = None
+        self.reconnect_count = 0
 
     async def load_history(self, symbol: str, interval: str, limit: int = 250) -> list[dict[str, Any]]:
         url = f"{self.rest_url}/api/v3/klines"
@@ -33,13 +38,28 @@ class MarketData:
             rows = json.loads(stdout.decode())
         result = [{"time": int(r[0] / 1000), "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": float(r[5]), "closed": True} for r in rows]
         self.candles[(symbol, interval)].clear(); self.candles[(symbol, interval)].extend(result)
+        self.last_candle_at[(symbol, interval)] = time.time()
         if result and symbol not in self.tickers:
             self.tickers[symbol] = {"symbol": symbol, "price": result[-1]["close"], "change": 0.0, "volume": result[-1]["volume"], "updated_at": result[-1]["time"]}
         return result
 
     async def ensure_history(self, symbol: str, interval: str) -> list[dict[str, Any]]:
         cached = list(self.candles[(symbol, interval)])
-        return cached if len(cached) >= 30 else await self.load_history(symbol, interval)
+        updated_at = self.last_candle_at.get((symbol, interval), 0.0)
+        cache_fresh = updated_at > 0 and time.time() - updated_at < 90
+        return cached if len(cached) >= 30 and cache_fresh else await self.load_history(symbol, interval)
+
+    def health_snapshot(self) -> dict[str, Any]:
+        now = time.time()
+        event_age = None if self.last_event_at is None else round(max(0.0, now - self.last_event_at), 1)
+        live = self._task is not None and event_age is not None and event_age < 45
+        return {
+            "live_feed": live,
+            "last_event_at": self.last_event_at,
+            "last_event_age_seconds": event_age,
+            "last_error": self.last_error,
+            "reconnect_count": self.reconnect_count,
+        }
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -73,6 +93,8 @@ class MarketData:
                     async for raw in socket:
                         payload = json.loads(raw); data = payload.get("data", {})
                         event_type = data.get("e")
+                        self.last_event_at = time.time()
+                        self.last_error = None
                         if event_type == "24hrTicker":
                             symbol = data.get("s")
                             if not symbol: continue
@@ -80,6 +102,7 @@ class MarketData:
                             price = float(data["c"])
                             change = float(data.get("P", 0.0))
                             self.tickers[symbol] = {"symbol": symbol, "price": price, "change": change, "volume": float(data.get("v", 0.0)), "updated_at": int(data.get("E", 0) / 1000)}
+                            self.last_ticker_at[symbol] = time.time()
                             await self._broadcast({"type": "ticker", "symbol": symbol, "price": price, "ticker": self.tickers[symbol]})
                             continue
                         k = data.get("k")
@@ -87,6 +110,7 @@ class MarketData:
                         symbol, interval = k["s"], k["i"]
                         candle = {"time": int(k["t"] / 1000), "open": float(k["o"]), "high": float(k["h"]), "low": float(k["l"]), "close": float(k["c"]), "volume": float(k["v"]), "closed": bool(k["x"])}
                         cache = self.candles[(symbol, interval)]
+                        self.last_candle_at[(symbol, interval)] = time.time()
                         if cache and cache[-1]["time"] == candle["time"]: cache[-1] = candle
                         else: cache.append(candle)
                         ticker = self.tickers.get(symbol, {})
@@ -100,6 +124,8 @@ class MarketData:
                         await self._broadcast({"type": "candle", "symbol": symbol, "interval": interval, "candle": candle, "ticker": ticker})
             except asyncio.CancelledError: raise
             except Exception as exc:
+                self.last_error = str(exc)
+                self.reconnect_count += 1
                 candidate_index += 1
                 log.warning("market websocket reconnect via candidate %s: %s", candidate_index, exc)
                 await asyncio.sleep(delay); delay = min(delay * 2, 30)
