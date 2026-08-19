@@ -75,6 +75,7 @@ class Store:
         with sqlite3.connect(self.db_path) as db:
             db.execute("create table if not exists trades (id text primary key, payload text not null, status text not null, created_at text not null)")
             db.execute("create table if not exists settings (id integer primary key check(id=1), payload text not null)")
+            db.execute("create table if not exists push_subscriptions (endpoint text primary key, p256dh text not null, auth text not null, expiration_time real, user_agent text, created_at text not null, updated_at text not null)")
             db.commit()
 
     async def _pg_query(self, query: str, params: tuple | list = (), fetch: str = "all"):
@@ -224,6 +225,72 @@ class Store:
         with sqlite3.connect(self.db_path) as db:
             rows = db.execute("select payload from trades where status in ('PENDING','OPEN','PARTIAL') order by created_at asc limit 500").fetchall()
             return [json.loads(row[0]) for row in rows]
+
+    async def upsert_push_subscription(self, subscription: dict[str, Any]) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        data = {
+            "endpoint": str(subscription["endpoint"]),
+            "p256dh": str(subscription["p256dh"]),
+            "auth": str(subscription["auth"]),
+            "expiration_time": subscription.get("expiration_time"),
+            "user_agent": subscription.get("user_agent"),
+            "updated_at": now,
+            "created_at": now,
+        }
+        if self.database_url:
+            query = """
+                insert into public.weeg_push_subscriptions
+                    (endpoint, p256dh, auth, expiration_time, user_agent, created_at, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s)
+                on conflict (endpoint) do update set
+                    p256dh = excluded.p256dh,
+                    auth = excluded.auth,
+                    expiration_time = excluded.expiration_time,
+                    user_agent = excluded.user_agent,
+                    updated_at = excluded.updated_at
+                returning *
+            """
+            return await self._pg_query(query, tuple(data.values()), fetch="one")
+        if self.persistent_storage_configured:
+            remote = await self._supabase("weeg_push_subscriptions", method="POST", params={"on_conflict": "endpoint"}, data=data)
+            if remote:
+                return remote[0]
+        with sqlite3.connect(self.db_path) as db:
+            db.execute(
+                "insert or replace into push_subscriptions(endpoint,p256dh,auth,expiration_time,user_agent,created_at,updated_at) values(?,?,?,?,?,?,?)",
+                tuple(data.values()),
+            )
+            db.commit()
+        return data
+
+    async def list_push_subscriptions(self) -> list[dict[str, Any]]:
+        if self.database_url:
+            return await self._pg_query("select endpoint, p256dh, auth, expiration_time, user_agent from public.weeg_push_subscriptions order by updated_at desc limit 100")
+        if self.persistent_storage_configured:
+            try:
+                remote = await self._supabase("weeg_push_subscriptions", params={"select": "endpoint,p256dh,auth,expiration_time,user_agent", "order": "updated_at.desc", "limit": "100"})
+                if remote is not None:
+                    return remote
+            except Exception:
+                pass
+        with sqlite3.connect(self.db_path) as db:
+            rows = db.execute("select endpoint,p256dh,auth,expiration_time,user_agent from push_subscriptions order by updated_at desc limit 100").fetchall()
+            return [dict(zip(("endpoint", "p256dh", "auth", "expiration_time", "user_agent"), row)) for row in rows]
+
+    async def delete_push_subscription(self, endpoint: str) -> bool:
+        if self.database_url:
+            row = await self._pg_query("delete from public.weeg_push_subscriptions where endpoint = %s returning endpoint", (endpoint,), fetch="one")
+            return bool(row)
+        if self.persistent_storage_configured:
+            try:
+                await self._supabase("weeg_push_subscriptions", method="DELETE", params={"endpoint": f"eq.{endpoint}"})
+                return True
+            except Exception:
+                pass
+        with sqlite3.connect(self.db_path) as db:
+            cursor = db.execute("delete from push_subscriptions where endpoint=?", (endpoint,))
+            db.commit()
+            return cursor.rowcount > 0
 
     async def find_open_auto_trade(self, symbol: str, timeframe: str) -> dict[str, Any] | None:
         if self.database_url:

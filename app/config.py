@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     minimum_rr: float = 2.0
     risk_per_trade: float = 0.005
     database_path: str = "weeg.db"
+    vapid_private_key: str | None = None
+    vapid_subject: str = "mailto:weeg-notifications@example.com"
 
     @property
     def postgres_dsn(self) -> str | None:

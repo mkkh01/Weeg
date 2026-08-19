@@ -7,13 +7,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v=5" />
+  <link rel="manifest" href="/static/manifest.webmanifest" />
+  <meta name="theme-color" content="#08131d" />
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">W</span><div><strong>WEEG</strong><small>Market Intelligence</small></div></div>
     <div class="live-pill"><i></i> بيانات حية <span id="last-update">—</span></div>
-    <div class="top-actions"><button class="ghost" id="refresh-btn">تحديث</button><button class="primary" id="settings-btn">الإعدادات</button></div>
+    <div class="top-actions"><button class="ghost" id="refresh-btn">تحديث</button><button class="ghost" id="push-btn" type="button">تفعيل إشعارات الهاتف</button><button class="primary" id="settings-btn">الإعدادات</button></div>
   </header>
   <main class="app-shell">
     <aside class="sidebar">

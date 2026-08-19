@@ -22,4 +22,8 @@ services:
         value: 15m
       - key: CORS_ORIGINS
         value: '*'
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
 

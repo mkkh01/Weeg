@@ -5,4 +5,5 @@ websockets==14.1
 pydantic-settings==2.7.1
 redis==5.2.1
 psycopg[binary]==3.2.9
+pywebpush==2.0.3
 

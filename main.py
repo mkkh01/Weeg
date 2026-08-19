@@ -13,11 +13,14 @@ from app.data.market import MarketData
 from app.analysis.engine import analyze
 from app.analysis.backtest import run_backtest
 from app.storage.store import Store
+from app.notifications import PushNotifier
 
 settings = get_settings()
 market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["1m", "15m", "1h", "4h"])
 store = Store(settings.database_path, settings.supabase_http_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
+push_notifier = PushNotifier(store, settings.vapid_private_key, settings.vapid_subject)
 log = logging.getLogger("weeg.auto_signals")
+push_log = logging.getLogger("weeg.push")
 AUTO_SCAN_SECONDS = 60
 STORAGE_RETRY_SECONDS = 30
 EXIT_SCAN_SECONDS = 5
@@ -59,6 +62,14 @@ class SettingsInput(BaseModel):
     confidence_threshold: int | None = None
     minimum_rr: float | None = None
     risk_per_trade: float | None = None
+
+
+class PushSubscriptionInput(BaseModel):
+    endpoint: str = Field(min_length=20, max_length=4096)
+    p256dh: str = Field(min_length=20, max_length=512)
+    auth: str = Field(min_length=8, max_length=256)
+    expiration_time: float | None = None
+    user_agent: str | None = Field(default=None, max_length=512)
 
 MTF_INTERVALS = ("4h", "1h", "15m")
 
@@ -158,10 +169,30 @@ async def _scan_and_store_auto_signals() -> list[dict]:
                 "mtf_vetoes": result.get("mtf_vetoes", []),
                 "mtf_timeframes": result.get("timeframes", {}),
             }
-            saved.append(await store.create_trade(trade))
+            saved_trade = await store.create_trade(trade)
+            saved.append(saved_trade)
+            asyncio.create_task(_notify_trade_opened(saved_trade))
         except Exception as exc:
             log.warning("auto signal scan failed for %s: %s", symbol, exc)
     return saved
+
+
+async def _notify_trade_opened(trade: dict) -> None:
+    try:
+        result = await push_notifier.trade_opened(trade)
+        if result["sent"] or result["failed"] or result["removed"]:
+            push_log.info("trade-open notification: %s", result)
+    except Exception:
+        push_log.exception("trade-open notification failed")
+
+
+async def _notify_trade_closed(trade: dict) -> None:
+    try:
+        result = await push_notifier.trade_closed(trade)
+        if result["sent"] or result["failed"] or result["removed"]:
+            push_log.info("trade-close notification: %s", result)
+    except Exception:
+        push_log.exception("trade-close notification failed")
 
 
 async def _auto_signal_loop():
@@ -259,6 +290,7 @@ async def _manage_open_trades():
                 updated = await store.update_trade(str(trade["id"]), patch)
                 if updated:
                     log.info("trade %s closed at %s: %s price=%s", trade.get("id"), symbol, patch["exit_reason"], price)
+                    asyncio.create_task(_notify_trade_closed(updated))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -290,6 +322,24 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def index(): return FileResponse(Path("templates/index.html"))
+
+@app.get("/api/push/config")
+async def push_config():
+    return {"enabled": push_notifier.configured, "public_key": push_notifier.public_key}
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(subscription: PushSubscriptionInput):
+    if not push_notifier.configured:
+        raise HTTPException(status_code=503, detail="إشعارات الهاتف غير مهيأة في الخادم")
+    saved = await store.upsert_push_subscription(subscription.model_dump())
+    return {"ok": True, "endpoint": saved.get("endpoint"), "subscriptions": len(await store.list_push_subscriptions())}
+
+
+@app.delete("/api/push/subscribe")
+async def push_unsubscribe(endpoint: str):
+    return {"ok": await store.delete_push_subscription(endpoint)}
+
 
 @app.get("/api/health")
 async def health(response: Response):

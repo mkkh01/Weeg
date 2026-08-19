@@ -17,7 +17,10 @@ const state = {
   cycleStateLoading: false,
   cycleSummaryLoading: false,
   cycleStateRequestId: 0,
-  cycleSummaryRequestId: 0
+  cycleSummaryRequestId: 0,
+  pushRegistration: null,
+  pushConfig: null,
+  pushSubscription: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -41,6 +44,90 @@ async function api(url, options = {}) {
   const response = await fetch(url, { cache: 'no-store', ...options, headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', ...(options.headers || {}) } });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
+}
+
+function pushButton(text, enabled = false, disabled = false) {
+  const button = $('#push-btn');
+  if (!button) return;
+  button.textContent = text;
+  button.disabled = disabled;
+  button.classList.toggle('push-enabled', enabled);
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = '='.repeat((4 - value.length % 4) % 4);
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
+}
+
+async function syncPushSubscription(subscription) {
+  const json = subscription.toJSON();
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) throw new Error('اشتراك الهاتف ناقص');
+  await api('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+      expiration_time: subscription.expirationTime,
+      user_agent: navigator.userAgent
+    })
+  });
+  state.pushSubscription = subscription;
+}
+
+async function enablePushNotifications() {
+  const button = $('#push-btn');
+  if (!button || button.disabled) return;
+  if (state.pushSubscription) {
+    toast('إشعارات الهاتف مفعلة بالفعل');
+    return;
+  }
+  try {
+    if (!state.pushRegistration || !state.pushConfig?.public_key) throw new Error('إشعارات الهاتف غير مهيأة');
+    if (!('Notification' in window) || !('PushManager' in window)) throw new Error('هذا المتصفح لا يدعم إشعارات Push');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') throw new Error('تم رفض إذن الإشعارات من الهاتف');
+    const subscription = await state.pushRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(state.pushConfig.public_key)
+    });
+    await syncPushSubscription(subscription);
+    pushButton('الإشعارات مفعلة', true);
+    toast('تم تفعيل إشعارات فتح وإغلاق الصفقات');
+  } catch (error) {
+    pushButton('تفعيل إشعارات الهاتف');
+    toast(error.message || 'تعذر تفعيل إشعارات الهاتف');
+  }
+}
+
+async function initPushNotifications() {
+  const button = $('#push-btn');
+  if (!button) return;
+  button.onclick = enablePushNotifications;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    pushButton('Push غير مدعوم', false, true);
+    return;
+  }
+  try {
+    state.pushConfig = await api(`/api/push/config?push=${Date.now()}`);
+    if (!state.pushConfig.enabled || !state.pushConfig.public_key) {
+      pushButton('Push غير مهيأ', false, true);
+      return;
+    }
+    state.pushRegistration = await navigator.serviceWorker.register('/static/push-sw.js', { scope: '/' });
+    const existing = await state.pushRegistration.pushManager.getSubscription();
+    if (existing && Notification.permission === 'granted') {
+      await syncPushSubscription(existing);
+      pushButton('الإشعارات مفعلة', true);
+    } else {
+      pushButton('تفعيل إشعارات الهاتف');
+    }
+  } catch (_) {
+    pushButton('تعذر تجهيز الإشعارات', false, true);
+  }
 }
 
 function renderWatchlist() {
@@ -447,6 +534,7 @@ $$('.chart-toolbar .tool').forEach((button) => button.onclick = () => {
 
 (async () => {
   initChart();
+  initPushNotifications();
   connectWS();
   await loadOverview();
   await loadTrades();
