@@ -90,7 +90,13 @@ class Store:
             dsn = self.database_url
             if "sslmode=" not in dsn:
                 dsn += "&sslmode=require" if "?" in dsn else "?sslmode=require"
-            with psycopg.connect(dsn, row_factory=dict_row) as conn:
+            with psycopg.connect(
+                dsn,
+                row_factory=dict_row,
+                connect_timeout=8,
+                options="-c statement_timeout=12000",
+                application_name="weeg-trading-dashboard",
+            ) as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(query, params)
                     if fetch == "one":
@@ -102,7 +108,10 @@ class Store:
                 conn.commit()
                 return result
 
-        return await asyncio.to_thread(run_query)
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(run_query), timeout=20)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError("PostgreSQL query timeout") from exc
 
     async def _supabase(self, table: str, method: str = "GET", params: dict | None = None, data: Any = None):
         if not (self.supabase_url and self.supabase_key):
