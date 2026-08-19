@@ -19,6 +19,7 @@ market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings
 store = Store(settings.database_path, settings.supabase_url, settings.supabase_key, settings.redis_url)
 log = logging.getLogger("weeg.auto_signals")
 AUTO_SCAN_SECONDS = 60
+STORAGE_RETRY_SECONDS = 30
 EXIT_SCAN_SECONDS = 5
 
 class TradeInput(BaseModel):
@@ -87,14 +88,22 @@ async def _scan_and_store_auto_signals() -> list[dict]:
 async def _auto_signal_loop():
     while True:
         try:
-            saved = await _scan_and_store_auto_signals()
-            if saved:
-                log.info("saved %d automatic paper signal(s)", len(saved))
+            if not store.has_persistent_storage:
+                await store.check_persistent_storage()
+            if store.has_persistent_storage:
+                saved = await _scan_and_store_auto_signals()
+                if saved:
+                    log.info("saved %d automatic paper signal(s)", len(saved))
+                delay = AUTO_SCAN_SECONDS
+            else:
+                log.warning("automatic signal scan paused: backend=%s error=%s", store.backend_name, store.storage_last_error)
+                delay = STORAGE_RETRY_SECONDS
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log.warning("automatic signal loop failed: %s", exc)
-        await asyncio.sleep(AUTO_SCAN_SECONDS)
+            delay = STORAGE_RETRY_SECONDS
+        await asyncio.sleep(delay)
 
 
 def evaluate_trade_exit(trade: dict, current_price: float) -> dict | None:
@@ -155,11 +164,9 @@ async def _manage_open_trades():
 async def lifespan(app: FastAPI):
     await store.check_persistent_storage()
     await market.start()
-    auto_task = None
-    if store.has_persistent_storage:
-        auto_task = asyncio.create_task(_auto_signal_loop())
-    else:
-        log.error("automatic signal loop disabled: persistent Supabase storage is unavailable or not configured; backend=%s", store.backend_name)
+    auto_task = asyncio.create_task(_auto_signal_loop())
+    if not store.has_persistent_storage:
+        log.error("automatic signal loop waiting for persistent Supabase storage; backend=%s error=%s", store.backend_name, store.storage_last_error)
     exit_task = asyncio.create_task(_manage_open_trades())
     try:
         yield
@@ -187,10 +194,13 @@ async def health():
         "symbols": len(settings.symbol_list),
         "live_feed": market._task is not None,
         "storage_backend": store.backend_name,
+        "persistent_storage_configured": store.persistent_storage_configured,
         "persistent_storage": persistent,
+        "storage_last_error": store.storage_last_error,
+        "storage_last_check_at": store.storage_last_check_at,
         "auto_signal_enabled": persistent,
         "auto_signal_storage": persistent,
-        "warning": None if persistent else "التخزين الدائم غير جاهز؛ لن تُنشأ صفقات آلية حتى لا تضيع عند إعادة تشغيل Render",
+        "warning": None if persistent else "التخزين الدائم غير جاهز؛ الفحص الآلي ينتظر اتصال Supabase ولن يحفظ صفقات في SQLite المؤقت",
     }
 
 @app.get("/api/market/candles")

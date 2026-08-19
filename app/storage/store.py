@@ -9,6 +9,8 @@ class Store:
         self.db_path, self.supabase_url, self.supabase_key, self.redis_url = db_path, supabase_url, supabase_key, redis_url
         self._init_sqlite()
         self.persistent_storage_ready = False
+        self.storage_last_error: str | None = None
+        self.storage_last_check_at: str | None = None
         self.redis = None
         if redis_url:
             try:
@@ -31,14 +33,21 @@ class Store:
         return "sqlite_ephemeral" if not self.persistent_storage_configured else "supabase_unavailable"
 
     async def check_persistent_storage(self) -> bool:
+        self.storage_last_check_at = datetime.now(timezone.utc).isoformat()
         if not self.persistent_storage_configured:
             self.persistent_storage_ready = False
+            self.storage_last_error = "missing_supabase_environment"
             return False
         try:
             await self._supabase("weeg_trades", params={"select": "id", "limit": "1"})
             self.persistent_storage_ready = True
-        except Exception:
+            self.storage_last_error = None
+        except httpx.HTTPStatusError as exc:
             self.persistent_storage_ready = False
+            self.storage_last_error = f"supabase_http_{exc.response.status_code}"
+        except Exception as exc:
+            self.persistent_storage_ready = False
+            self.storage_last_error = type(exc).__name__
         return self.persistent_storage_ready
 
     def _init_sqlite(self):
