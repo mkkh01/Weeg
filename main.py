@@ -14,7 +14,7 @@ from app.analysis.engine import analyze
 from app.analysis.backtest import run_backtest
 from app.storage.store import Store
 from app.notifications import PushNotifier
-from app.telegram import TelegramNotifier
+from app.telegram import TelegramBotController, TelegramNotifier
 
 settings = get_settings()
 market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["15m", "1h", "4h"])
@@ -41,6 +41,7 @@ cycle_state = {
     "run_id": 0,
     "last_run_duration_seconds": None,
 }
+telegram_bot = TelegramBotController(telegram_notifier, store, market, settings, cycle_state)
 
 class TradeInput(BaseModel):
     symbol: str
@@ -319,6 +320,7 @@ async def lifespan(app: FastAPI):
     await store.check_persistent_storage()
     await market.start()
     auto_task = asyncio.create_task(_auto_signal_loop())
+    telegram_task = asyncio.create_task(telegram_bot.run()) if telegram_bot.configured else None
     if not store.has_persistent_storage:
         log.error("automatic signal loop waiting for persistent Supabase storage; backend=%s error=%s", store.backend_name, store.storage_last_error)
     exit_task = asyncio.create_task(_manage_open_trades())
@@ -327,8 +329,10 @@ async def lifespan(app: FastAPI):
     finally:
         if auto_task:
             auto_task.cancel()
+        if telegram_task:
+            telegram_task.cancel()
         exit_task.cancel()
-        tasks = [exit_task] + ([auto_task] if auto_task else [])
+        tasks = [exit_task] + ([auto_task] if auto_task else []) + ([telegram_task] if telegram_task else [])
         await asyncio.gather(*tasks, return_exceptions=True)
         await market.stop()
 
@@ -388,6 +392,7 @@ async def health(response: Response):
         "storage_last_error": store.storage_last_error,
         "storage_last_check_at": store.storage_last_check_at,
         "telegram_notifications_enabled": telegram_notifier.configured,
+        "telegram_controls_enabled": telegram_bot.configured,
         "auto_signal_enabled": persistent,
         "auto_signal_storage": persistent,
         "warning": None if persistent else "التخزين الدائم غير جاهز؛ الفحص الآلي ينتظر اتصال Supabase ولن يحفظ صفقات في SQLite المؤقت",
