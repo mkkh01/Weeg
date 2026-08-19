@@ -10,8 +10,10 @@ DEFAULT_SYMBOLS = [
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    supabase_url: str | None = None
+    supabase_url: str | None = "https://ymjancsrnmunkyaomdsx.supabase.co"
     supabase_key: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_anon_key: str | None = None
     redis_url: str | None = None
     binance_rest_url: str = "https://data-api.binance.vision"
     binance_ws_url: str = "wss://data-stream.binance.vision/stream,wss://stream.binance.us:9443/stream"
@@ -22,6 +24,10 @@ class Settings(BaseSettings):
     minimum_rr: float = 2.0
     risk_per_trade: float = 0.005
     database_path: str = "weeg.db"
+
+    @property
+    def supabase_auth_key(self) -> str | None:
+        return self.supabase_service_role_key or self.supabase_key or self.supabase_anon_key
 
     @property
     def symbol_list(self) -> list[str]:

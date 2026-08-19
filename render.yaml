@@ -7,6 +7,8 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: SUPABASE_URL
+        value: https://ymjancsrnmunkyaomdsx.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SUPABASE_KEY
         sync: false
