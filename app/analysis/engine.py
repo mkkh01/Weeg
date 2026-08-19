@@ -123,12 +123,14 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
 
     risk_buffer = max(atr * profile.atr_multiplier, current * profile.price_buffer)
     entry = current
+    target_rr = effective_minimum_rr
+    target_extension = target_rr + 1.0
     if direction == "LONG":
-        sl, tp1, tp2 = current - risk_buffer, current + risk_buffer * 2, current + risk_buffer * 3
+        sl, tp1, tp2 = current - risk_buffer, current + risk_buffer * target_rr, current + risk_buffer * target_extension
     elif direction == "SHORT":
-        sl, tp1, tp2 = current + risk_buffer, current - risk_buffer * 2, current - risk_buffer * 3
+        sl, tp1, tp2 = current + risk_buffer, current - risk_buffer * target_rr, current - risk_buffer * target_extension
     else:
-        sl, tp1, tp2 = current - risk_buffer, current + risk_buffer * 2, current + risk_buffer * 3
+        sl, tp1, tp2 = current - risk_buffer, current + risk_buffer * target_rr, current + risk_buffer * target_extension
     rr = abs(tp1 - entry) / max(abs(entry - sl), 1e-9)
 
     reasons = [f"ملف الأصل: {profile.label}"]
