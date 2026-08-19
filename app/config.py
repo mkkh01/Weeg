@@ -26,8 +26,12 @@ class Settings(BaseSettings):
     database_path: str = "weeg.db"
 
     @property
+    def supabase_auth_keys(self) -> list[str]:
+        return [key for key in (self.supabase_service_role_key, self.supabase_key, self.supabase_anon_key) if key]
+
+    @property
     def supabase_auth_key(self) -> str | None:
-        return self.supabase_service_role_key or self.supabase_key or self.supabase_anon_key
+        return self.supabase_auth_keys[0] if self.supabase_auth_keys else None
 
     @property
     def symbol_list(self) -> list[str]:

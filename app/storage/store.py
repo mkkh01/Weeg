@@ -5,12 +5,15 @@ from typing import Any
 import httpx
 
 class Store:
-    def __init__(self, db_path: str, supabase_url: str | None = None, supabase_key: str | None = None, redis_url: str | None = None):
-        self.db_path, self.supabase_url, self.supabase_key, self.redis_url = db_path, supabase_url, supabase_key, redis_url
+    def __init__(self, db_path: str, supabase_url: str | None = None, supabase_key: str | list[str] | None = None, redis_url: str | None = None):
+        self.db_path, self.supabase_url, self.redis_url = db_path, supabase_url, redis_url
+        self.supabase_keys = [supabase_key] if isinstance(supabase_key, str) and supabase_key else list(supabase_key or [])
+        self.supabase_key = self.supabase_keys[0] if self.supabase_keys else None
         self._init_sqlite()
         self.persistent_storage_ready = False
         self.storage_last_error: str | None = None
         self.storage_last_check_at: str | None = None
+        self.storage_key_source: str | None = None
         self.redis = None
         if redis_url:
             try:
@@ -20,7 +23,11 @@ class Store:
 
     @property
     def persistent_storage_configured(self) -> bool:
-        return bool(self.supabase_url and self.supabase_key)
+        return bool(self.supabase_url and self.supabase_keys)
+
+    @property
+    def supabase_key_count(self) -> int:
+        return len(self.supabase_keys)
 
     @property
     def has_persistent_storage(self) -> bool:
@@ -38,17 +45,23 @@ class Store:
             self.persistent_storage_ready = False
             self.storage_last_error = "missing_supabase_environment"
             return False
-        try:
-            await self._supabase("weeg_trades", params={"select": "id", "limit": "1"})
-            self.persistent_storage_ready = True
-            self.storage_last_error = None
-        except httpx.HTTPStatusError as exc:
-            self.persistent_storage_ready = False
-            self.storage_last_error = f"supabase_http_{exc.response.status_code}"
-        except Exception as exc:
-            self.persistent_storage_ready = False
-            self.storage_last_error = type(exc).__name__
-        return self.persistent_storage_ready
+        last_error = None
+        for index, key in enumerate(self.supabase_keys):
+            self.supabase_key = key
+            try:
+                await self._supabase("weeg_trades", params={"select": "id", "limit": "1"})
+                self.persistent_storage_ready = True
+                self.storage_last_error = None
+                self.storage_key_source = f"candidate_{index + 1}"
+                return True
+            except httpx.HTTPStatusError as exc:
+                last_error = f"supabase_http_{exc.response.status_code}"
+            except Exception as exc:
+                last_error = type(exc).__name__
+        self.persistent_storage_ready = False
+        self.storage_last_error = last_error or "supabase_auth_failed"
+        self.storage_key_source = None
+        return False
 
     def _init_sqlite(self):
         with sqlite3.connect(self.db_path) as db:
