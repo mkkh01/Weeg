@@ -6,6 +6,8 @@ services:
     startCommand: venv/bin/python main.py
     healthCheckPath: /api/health
     envVars:
+      - key: DATABASE_URL
+        sync: false
       - key: SUPABASE_URL
         value: https://ymjancsrnmunkyaomdsx.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
