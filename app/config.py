@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "LTCUSDT", "XRPUSDT", "ADAUSDT",
     "SOLUSDT", "DOTUSDT", "LINKUSDT", "AVAXUSDT", "BNBUSDT",
+    "TRXUSDT", "BCHUSDT", "UNIUSDT", "ETCUSDT", "ATOMUSDT",
+    "XLMUSDT", "NEARUSDT", "FILUSDT", "APTUSDT", "ARBUSDT",
 ]
 
 class Settings(BaseSettings):
