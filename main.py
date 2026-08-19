@@ -254,7 +254,7 @@ async def summary_cycle():
     if store.has_persistent_storage:
         results = await asyncio.gather(
             store.list_active_trades(),
-            store.list_trades("CLOSED"),
+            store.list_trades("CLOSED_OR_STOPPED"),
             return_exceptions=True,
         )
         if isinstance(results[0], Exception):

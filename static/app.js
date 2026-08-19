@@ -271,7 +271,8 @@ async function loadCycleSummary() {
     const health = data.health || {};
     const trades = data.trades || {};
     const statusLabels = { CHECKING: 'يفحص الآن', IDLE: 'جاهز للدورة التالية', WAITING_STORAGE: 'ينتظر التخزين', ERROR: 'خطأ في الدورة', STARTING: 'يبدأ' };
-    const status = cycle.status || 'STARTING';
+    const due = cycle.status === 'IDLE' && Number(cycle.next_run_at) <= Date.now() / 1000;
+    const status = due ? 'CHECKING' : (cycle.status || 'STARTING');
     const statusEl = $('#cycle-status');
     statusEl.textContent = statusLabels[status] || status;
     statusEl.className = `cycle-status ${status === 'IDLE' ? 'positive' : status === 'ERROR' || status === 'WAITING_STORAGE' ? 'negative' : 'neutral'}`;
@@ -307,10 +308,15 @@ async function loadCycleSummary() {
 
 async function loadTrades(status = 'open') {
   try {
-    const rows = await api(`/api/trades?status=${status === 'open' ? 'OPEN' : 'CLOSED'}`);
+    const rows = await api(`/api/trades?status=${status === 'open' ? 'OPEN' : 'CLOSED_OR_STOPPED'}`);
     $('#trades-body').innerHTML = rows.length
-      ? rows.map((trade) => `<tr><td>${trade.symbol}</td><td class="${trade.direction === 'LONG' ? 'positive' : 'negative'}">${trade.direction}</td><td>${fmt(trade.entry)}</td><td>${fmt(trade.stop_loss)}</td><td>${fmt(trade.take_profit_1)}</td><td>${trade.status}</td></tr>`).join('')
-      : `<tr><td colspan="6" class="neutral">لا توجد صفقات ${status === 'open' ? 'مفتوحة' : 'مغلقة'} بعد</td></tr>`;
+      ? rows.map((trade) => {
+        const result = trade.result === 'WIN' || trade.status === 'CLOSED' ? 'فوز' : trade.result === 'LOSS' || trade.status === 'STOPPED' ? 'خسارة' : 'قيد التشغيل';
+        const resultClass = result === 'فوز' ? 'positive' : result === 'خسارة' ? 'negative' : 'neutral';
+        const reason = trade.exit_reason === 'TAKE_PROFIT_1' ? 'الهدف الأول' : trade.exit_reason === 'STOP_LOSS' ? 'وقف الخسارة' : '';
+        return `<tr><td>${trade.symbol}</td><td class="${trade.direction === 'LONG' ? 'positive' : 'negative'}">${trade.direction}</td><td>${fmt(trade.entry)}</td><td>${fmt(trade.stop_loss)}</td><td>${fmt(trade.take_profit_1)}</td><td>${trade.status}</td><td><span class="trade-result ${resultClass}" title="${reason}">${result}</span></td></tr>`;
+      }).join('')
+      : `<tr><td colspan="7" class="neutral">لا توجد صفقات ${status === 'open' ? 'مفتوحة' : 'منتهية'} بعد</td></tr>`;
   } catch (error) {
     toast('تعذر تحميل سجل الصفقات');
   }
@@ -406,5 +412,5 @@ $$('.chart-toolbar .tool').forEach((button) => button.onclick = () => {
   await loadCycleSummary();
   state.refreshTimer = setInterval(() => { refreshActive(); loadTrades(); }, 30000);
   setInterval(loadOverview, 60000);
-  setInterval(loadCycleSummary, 15000);
+  setInterval(loadCycleSummary, 5000);
 })();

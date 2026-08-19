@@ -169,7 +169,9 @@ class Store:
         if self.database_url:
             query = "select * from public.weeg_trades"
             params: list[Any] = []
-            if status:
+            if status == "CLOSED_OR_STOPPED":
+                query += " where status in ('CLOSED','STOPPED')"
+            elif status:
                 query += " where status = %s"
                 params.append(status)
             query += " order by signal_time desc limit 200"
@@ -180,7 +182,9 @@ class Store:
                     raise
         try:
             params = {"select": "*", "order": "signal_time.desc", "limit": "200"}
-            if status:
+            if status == "CLOSED_OR_STOPPED":
+                params["status"] = "in.(CLOSED,STOPPED)"
+            elif status:
                 params["status"] = f"eq.{status}"
             remote = await self._supabase("weeg_trades", params=params)
             if remote is not None:
@@ -190,7 +194,9 @@ class Store:
         with sqlite3.connect(self.db_path) as db:
             query = "select payload from trades"
             args = []
-            if status:
+            if status == "CLOSED_OR_STOPPED":
+                query += " where status in ('CLOSED','STOPPED')"
+            elif status:
                 query += " where status=?"
                 args.append(status)
             query += " order by created_at desc limit 200"
