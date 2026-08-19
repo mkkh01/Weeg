@@ -327,7 +327,7 @@ async function loadCycleSummary() {
     const readySymbols = (cycle.ready_symbols || []).join('، ') || 'لا توجد';
     $('#cycle-note').textContent = error || warnings
       ? `تنبيه: ${error || warnings}`
-      : `آخر دورة: ${cycleTime(cycle.finished_at)} · الإشارات: ${readySymbols} · المفتوحة: ${(trades.latest_open || []).join('، ') || 'لا توجد'}`;
+      : `الدورة #${cycle.run_id || cycle.completed_cycles || 0}: ${cycleTime(cycle.finished_at)} · المدة: ${cycle.last_run_duration_seconds ?? '—'}ث · الإشارات: ${readySymbols} · المفتوحة: ${(trades.latest_open || []).join('، ') || 'لا توجد'}`;
     state.lastCycleSummary = data;
   } catch (error) {
     const statusEl = $('#cycle-status');
