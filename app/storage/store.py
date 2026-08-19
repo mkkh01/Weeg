@@ -13,7 +13,7 @@ class Store:
         "stop_loss", "take_profit_1", "take_profit_2", "risk_reward", "confidence", "regime",
         "structure_state", "liquidity_state", "fvg_state", "volume_state", "momentum_state",
         "status", "result", "pnl", "max_favorable_excursion", "max_adverse_excursion",
-        "exit_reason", "created_at", "closed_at", "source", "auto_created", "asset_profile",
+        "exit_reason", "exit_price", "created_at", "closed_at", "source", "auto_created", "asset_profile",
         "signal_reasons",
     }
     PG_UPDATE_FIELDS = PG_TRADE_FIELDS - {"id", "created_at"}
@@ -176,7 +176,7 @@ class Store:
                 params.append(status)
             query += " order by signal_time desc limit 200"
             try:
-                return await self._pg_query(query, params)
+                return self._decorate_trades(await self._pg_query(query, params))
             except Exception:
                 if self.persistent_storage_ready and self.storage_key_source == "postgres":
                     raise
@@ -188,7 +188,7 @@ class Store:
                 params["status"] = f"eq.{status}"
             remote = await self._supabase("weeg_trades", params=params)
             if remote is not None:
-                return remote
+                return self._decorate_trades(remote)
         except Exception:
             pass
         with sqlite3.connect(self.db_path) as db:
@@ -200,7 +200,7 @@ class Store:
                 query += " where status=?"
                 args.append(status)
             query += " order by created_at desc limit 200"
-            return [json.loads(row[0]) for row in db.execute(query, args).fetchall()]
+            return self._decorate_trades([json.loads(row[0]) for row in db.execute(query, args).fetchall()])
 
     async def list_active_trades(self) -> list[dict[str, Any]]:
         if self.database_url:
@@ -254,6 +254,22 @@ class Store:
                 (symbol.upper(), timeframe),
             ).fetchone()
             return json.loads(row[0]) if row else None
+
+    @staticmethod
+    def _decorate_trade(trade: dict[str, Any]) -> dict[str, Any]:
+        if trade.get("exit_price") is None and trade.get("status") in ("CLOSED", "STOPPED") and trade.get("pnl") is not None:
+            try:
+                entry = float(trade["entry"])
+                pnl_percent = float(trade["pnl"])
+                exit_price = entry * (1 + pnl_percent / 100) if trade.get("direction") == "LONG" else entry * (1 - pnl_percent / 100)
+                trade = {**trade, "exit_price": round(exit_price, 8)}
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                pass
+        return trade
+
+    @classmethod
+    def _decorate_trades(cls, trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [cls._decorate_trade(trade) for trade in trades]
 
     @staticmethod
     def _pg_value(field: str, value: Any) -> Any:

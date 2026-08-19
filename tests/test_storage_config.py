@@ -1,4 +1,7 @@
 import os
+import asyncio
+import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -32,6 +35,23 @@ class StorageConfigTests(unittest.TestCase):
         settings = Settings(supabase_url="postgresql://postgres.example/postgres")
         self.assertEqual(settings.postgres_dsn, "postgresql://postgres.example/postgres")
         self.assertTrue(settings.supabase_http_url.startswith("https://"))
+
+    def test_closed_and_stopped_trades_include_exit_price(self):
+        with tempfile.NamedTemporaryFile(suffix=".db") as db:
+            store = Store(db.name)
+            with sqlite3.connect(db.name) as connection:
+                for trade_id, status, direction, entry, pnl in [
+                    ("win", "CLOSED", "LONG", 100.0, 10.0),
+                    ("loss", "STOPPED", "SHORT", 100.0, -5.0),
+                ]:
+                    payload = {"id": trade_id, "symbol": "BTCUSDT", "direction": direction, "entry": entry, "pnl": pnl, "status": status, "closed_at": "2026-08-19T00:00:00+00:00"}
+                    connection.execute("insert into trades(id,payload,status,created_at) values(?,?,?,?)", (trade_id, json.dumps(payload), status, payload["closed_at"]))
+                connection.commit()
+            rows = asyncio.run(store.list_trades("CLOSED_OR_STOPPED"))
+            by_id = {row["id"]: row for row in rows}
+            self.assertEqual(by_id["win"]["exit_price"], 110.0)
+            self.assertEqual(by_id["loss"]["exit_price"], 105.0)
+            self.assertTrue(by_id["loss"]["closed_at"])
 
 
 if __name__ == "__main__":

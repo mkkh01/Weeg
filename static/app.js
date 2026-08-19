@@ -264,32 +264,54 @@ function cycleTime(value) {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function exitDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('ar-EG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function renderCycleState(data, includeTradeCounts = false) {
+  const cycle = data.cycle || {};
+  const health = data.health || {};
+  const trades = data.trades || {};
+  const statusLabels = { CHECKING: 'يفحص الآن', IDLE: 'جاهز للدورة التالية', WAITING_STORAGE: 'ينتظر التخزين', ERROR: 'خطأ في الدورة', STARTING: 'يبدأ' };
+  const due = cycle.status === 'IDLE' && Number(cycle.next_run_at) <= Date.now() / 1000;
+  const status = due ? 'CHECKING' : (cycle.status || 'STARTING');
+  const statusEl = $('#cycle-status');
+  statusEl.textContent = statusLabels[status] || status;
+  statusEl.className = `cycle-status ${status === 'IDLE' ? 'positive' : status === 'ERROR' || status === 'WAITING_STORAGE' ? 'negative' : 'neutral'}`;
+  $('#cycle-storage').textContent = health.persistent_storage ? 'PostgreSQL متصل' : 'غير جاهز';
+  $('#cycle-auto').textContent = health.auto_signal_enabled ? 'مفعّل' : 'متوقف';
+  $('#cycle-scanned').textContent = cycle.scanned_symbols ? `${cycle.scanned_symbols} عملة` : '—';
+  $('#cycle-ready').textContent = `${cycle.ready_signals || 0}`;
+  $('#cycle-count').textContent = `${cycle.completed_cycles || 0}`;
+  $('#cycle-saved').textContent = cycle.saved_trades ? `${cycle.saved_trades} · ${(cycle.last_saved_symbols || []).join(', ')}` : 'لا جديد';
+  $('#cycle-next').textContent = cycleTime(cycle.next_run_at);
+  if (includeTradeCounts) {
+    $('#cycle-open').textContent = `${trades.open || 0}`;
+    $('#cycle-closed').textContent = `${trades.closed || 0}`;
+  }
+  return { cycle, health, trades };
+}
+
+async function loadCycleState() {
+  try {
+    renderCycleState(await api('/api/summary/cycle/state?v=live'));
+  } catch (_) {
+    // The full summary retains the last good values; this fast heartbeat retries automatically.
+  }
+}
+
 async function loadCycleSummary() {
   try {
     const data = await api('/api/summary/cycle');
-    const cycle = data.cycle || {};
-    const health = data.health || {};
-    const trades = data.trades || {};
-    const statusLabels = { CHECKING: 'يفحص الآن', IDLE: 'جاهز للدورة التالية', WAITING_STORAGE: 'ينتظر التخزين', ERROR: 'خطأ في الدورة', STARTING: 'يبدأ' };
-    const due = cycle.status === 'IDLE' && Number(cycle.next_run_at) <= Date.now() / 1000;
-    const status = due ? 'CHECKING' : (cycle.status || 'STARTING');
-    const statusEl = $('#cycle-status');
-    statusEl.textContent = statusLabels[status] || status;
-    statusEl.className = `cycle-status ${status === 'IDLE' ? 'positive' : status === 'ERROR' || status === 'WAITING_STORAGE' ? 'negative' : 'neutral'}`;
-    $('#cycle-storage').textContent = health.persistent_storage ? 'PostgreSQL متصل' : 'غير جاهز';
-    $('#cycle-auto').textContent = health.auto_signal_enabled ? 'مفعّل' : 'متوقف';
-    $('#cycle-scanned').textContent = cycle.scanned_symbols ? `${cycle.scanned_symbols} عملة` : '—';
-    $('#cycle-ready').textContent = `${cycle.ready_signals || 0}`;
-    $('#cycle-open').textContent = `${trades.open || 0}`;
-    $('#cycle-closed').textContent = `${trades.closed || 0}`;
-    $('#cycle-count').textContent = `${cycle.completed_cycles || 0}`;
-    $('#cycle-saved').textContent = cycle.saved_trades ? `${cycle.saved_trades} · ${(cycle.last_saved_symbols || []).join(', ')}` : 'لا جديد';
-    $('#cycle-next').textContent = cycleTime(cycle.next_run_at);
+    const { cycle, health, trades } = renderCycleState(data, true);
     const error = cycle.last_error || health.storage_last_error;
     const warnings = (data.warnings || []).join('، ');
+    const readySymbols = (cycle.ready_symbols || []).join('، ') || 'لا توجد';
     $('#cycle-note').textContent = error || warnings
       ? `تنبيه: ${error || warnings}`
-      : `آخر دورة: ${cycleTime(cycle.finished_at)} · الصفقات المفتوحة: ${(trades.latest_open || []).join('، ') || 'لا توجد'}`;
+      : `آخر دورة: ${cycleTime(cycle.finished_at)} · الإشارات: ${readySymbols} · المفتوحة: ${(trades.latest_open || []).join('، ') || 'لا توجد'}`;
     state.lastCycleSummary = data;
   } catch (error) {
     const statusEl = $('#cycle-status');
@@ -314,9 +336,10 @@ async function loadTrades(status = 'open') {
         const result = trade.result === 'WIN' || trade.status === 'CLOSED' ? 'فوز' : trade.result === 'LOSS' || trade.status === 'STOPPED' ? 'خسارة' : 'قيد التشغيل';
         const resultClass = result === 'فوز' ? 'positive' : result === 'خسارة' ? 'negative' : 'neutral';
         const reason = trade.exit_reason === 'TAKE_PROFIT_1' ? 'الهدف الأول' : trade.exit_reason === 'STOP_LOSS' ? 'وقف الخسارة' : '';
-        return `<tr><td>${trade.symbol}</td><td class="${trade.direction === 'LONG' ? 'positive' : 'negative'}">${trade.direction}</td><td>${fmt(trade.entry)}</td><td>${fmt(trade.stop_loss)}</td><td>${fmt(trade.take_profit_1)}</td><td>${trade.status}</td><td><span class="trade-result ${resultClass}" title="${reason}">${result}</span></td></tr>`;
+        const exitTime = trade.closed_at ? exitDateTime(trade.closed_at) : '—';
+        return `<tr><td>${trade.symbol}</td><td class="${trade.direction === 'LONG' ? 'positive' : 'negative'}">${trade.direction}</td><td>${fmt(trade.entry)}</td><td>${fmt(trade.stop_loss)}</td><td>${fmt(trade.take_profit_1)}</td><td>${trade.exit_price == null ? '—' : fmt(trade.exit_price)}</td><td>${exitTime}</td><td>${trade.status}</td><td><span class="trade-result ${resultClass}" title="${reason}">${result}</span></td></tr>`;
       }).join('')
-      : `<tr><td colspan="7" class="neutral">لا توجد صفقات ${status === 'open' ? 'مفتوحة' : 'منتهية'} بعد</td></tr>`;
+      : `<tr><td colspan="9" class="neutral">لا توجد صفقات ${status === 'open' ? 'مفتوحة' : 'منتهية'} بعد</td></tr>`;
   } catch (error) {
     toast('تعذر تحميل سجل الصفقات');
   }
@@ -412,5 +435,6 @@ $$('.chart-toolbar .tool').forEach((button) => button.onclick = () => {
   await loadCycleSummary();
   state.refreshTimer = setInterval(() => { refreshActive(); loadTrades(); }, 30000);
   setInterval(loadOverview, 60000);
-  setInterval(loadCycleSummary, 5000);
+  setInterval(loadCycleState, 1000);
+  setInterval(loadCycleSummary, 15000);
 })();

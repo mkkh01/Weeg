@@ -22,6 +22,8 @@ class TradeExitTests(unittest.TestCase):
         self.assertEqual(result["status"], "CLOSED")
         self.assertEqual(result["result"], "WIN")
         self.assertEqual(result["exit_reason"], "TAKE_PROFIT_1")
+        self.assertEqual(result["exit_price"], 110.0)
+        self.assertTrue(result["closed_at"])
 
     def test_short_closes_at_take_profit(self):
         result = evaluate_trade_exit(make_trade("SHORT"), 90.0)
@@ -34,6 +36,8 @@ class TradeExitTests(unittest.TestCase):
         self.assertEqual(result["status"], "STOPPED")
         self.assertEqual(result["result"], "LOSS")
         self.assertEqual(result["exit_reason"], "STOP_LOSS")
+        self.assertEqual(result["exit_price"], 95.0)
+        self.assertTrue(result["closed_at"])
 
     def test_short_stops_at_stop_loss(self):
         result = evaluate_trade_exit(make_trade("SHORT"), 105.0)

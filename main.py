@@ -15,7 +15,7 @@ from app.analysis.backtest import run_backtest
 from app.storage.store import Store
 
 settings = get_settings()
-market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list)
+market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval)
 store = Store(settings.database_path, settings.supabase_http_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
 log = logging.getLogger("weeg.auto_signals")
 AUTO_SCAN_SECONDS = 60
@@ -28,6 +28,7 @@ cycle_state = {
     "next_run_at": None,
     "scanned_symbols": 0,
     "ready_signals": 0,
+    "ready_symbols": [],
     "saved_trades": 0,
     "last_saved_symbols": [],
     "last_error": None,
@@ -68,6 +69,7 @@ async def _scan_and_store_auto_signals() -> list[dict]:
                 continue
             ready_signals += 1
             cycle_state["ready_signals"] = ready_signals
+            cycle_state["ready_symbols"].append(symbol)
             existing = await store.find_open_auto_trade(symbol, settings.default_interval)
             if existing:
                 continue
@@ -109,6 +111,7 @@ async def _auto_signal_loop():
             "finished_at": None,
             "scanned_symbols": 0,
             "ready_signals": 0,
+            "ready_symbols": [],
             "saved_trades": 0,
             "last_saved_symbols": [],
             "last_error": None,
@@ -172,6 +175,7 @@ def evaluate_trade_exit(trade: dict, current_price: float) -> dict | None:
         "result": "LOSS" if stopped else "WIN",
         "pnl": round(gross_pnl, 8),
         "exit_reason": reason,
+        "exit_price": round(current, 8),
         "closed_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -244,6 +248,20 @@ async def health():
         "auto_signal_enabled": persistent,
         "auto_signal_storage": persistent,
         "warning": None if persistent else "التخزين الدائم غير جاهز؛ الفحص الآلي ينتظر اتصال Supabase ولن يحفظ صفقات في SQLite المؤقت",
+    }
+
+@app.get("/api/summary/cycle/state")
+async def summary_cycle_state():
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cycle": {**cycle_state, "ready_symbols": list(cycle_state.get("ready_symbols", []))},
+        "health": {
+            "storage_backend": store.backend_name,
+            "persistent_storage": store.has_persistent_storage,
+            "auto_signal_enabled": store.has_persistent_storage,
+            "live_feed": market._task is not None,
+            "storage_last_error": store.storage_last_error,
+        },
     }
 
 @app.get("/api/summary/cycle")

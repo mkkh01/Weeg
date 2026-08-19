@@ -8,10 +8,11 @@ import websockets
 log = logging.getLogger("weeg.market")
 
 class MarketData:
-    def __init__(self, rest_url: str, ws_url: str, symbols: list[str]):
+    def __init__(self, rest_url: str, ws_url: str, symbols: list[str], analysis_interval: str = "15m"):
         self.rest_url = rest_url.rstrip("/")
         self.ws_urls = [url.strip().rstrip("/") for url in ws_url.split(",") if url.strip()]
         self.symbols = symbols
+        self.analysis_interval = analysis_interval
         self.candles: dict[tuple[str, str], deque] = defaultdict(lambda: deque(maxlen=500))
         self.tickers: dict[str, dict[str, Any]] = {}
         self._task: asyncio.Task | None = None
@@ -57,7 +58,8 @@ class MarketData:
         if self._task: self._task.cancel(); await asyncio.gather(self._task, return_exceptions=True)
 
     async def _run(self):
-        streams = "/".join([*(f"{s.lower()}@kline_1m" for s in self.symbols), *(f"{s.lower()}@ticker" for s in self.symbols)])
+        intervals = ["1m"] if self.analysis_interval == "1m" else ["1m", self.analysis_interval]
+        streams = "/".join([*(f"{s.lower()}@kline_{interval}" for s in self.symbols for interval in intervals), *(f"{s.lower()}@ticker" for s in self.symbols)])
         delay = 1
         candidate_index = 0
         while True:
