@@ -149,7 +149,8 @@ class Store:
                add column if not exists long_min_confidence integer not null default 85,
                add column if not exists long_allow_ranging boolean not null default false,
                add column if not exists long_allow_mid_cap boolean not null default false,
-               add column if not exists long_require_fvg boolean not null default true,
+               add column if not exists long_require_fvg boolean not null default false,
+               add column if not exists long_prefer_fvg boolean not null default true,
                add column if not exists long_peak_distance_atr numeric not null default 0.35,
                add column if not exists long_max_extension_atr numeric not null default 1.5,
                add column if not exists fee_rate numeric not null default 0.0004,
@@ -447,8 +448,8 @@ class Store:
             current = await self.get_settings()
             merged = {**current, **settings}
             symbols = merged.get("symbols") or []
-            fields = ["symbols", "macro_timeframe", "trend_timeframe", "confirmation_timeframe", "execution_timeframe", "risk_per_trade", "minimum_rr", "confidence_threshold", "enable_short_signals", "long_min_confidence", "long_allow_ranging", "long_allow_mid_cap", "long_require_fvg", "long_peak_distance_atr", "long_max_extension_atr", "fee_rate", "slippage_rate", "account_equity"]
-            values = [merged.get("symbols", symbols), merged.get("macro_timeframe", "4h"), merged.get("trend_timeframe", "1h"), merged.get("confirmation_timeframe", "15m"), merged.get("execution_timeframe", "5m"), merged.get("risk_per_trade", 0.005), merged.get("minimum_rr", 2.0), merged.get("confidence_threshold", 65), merged.get("enable_short_signals", False), merged.get("long_min_confidence", 85), merged.get("long_allow_ranging", False), merged.get("long_allow_mid_cap", False), merged.get("long_require_fvg", True), merged.get("long_peak_distance_atr", 0.35), merged.get("long_max_extension_atr", 1.5), merged.get("fee_rate", 0.0004), merged.get("slippage_rate", 0.0002), merged.get("account_equity")]
+            fields = ["symbols", "macro_timeframe", "trend_timeframe", "confirmation_timeframe", "execution_timeframe", "risk_per_trade", "minimum_rr", "confidence_threshold", "enable_short_signals", "long_min_confidence", "long_allow_ranging", "long_allow_mid_cap", "long_require_fvg", "long_prefer_fvg", "long_peak_distance_atr", "long_max_extension_atr", "fee_rate", "slippage_rate", "account_equity"]
+            values = [merged.get("symbols", symbols), merged.get("macro_timeframe", "4h"), merged.get("trend_timeframe", "1h"), merged.get("confirmation_timeframe", "15m"), merged.get("execution_timeframe", "5m"), merged.get("risk_per_trade", 0.005), merged.get("minimum_rr", 2.0), merged.get("confidence_threshold", 65), merged.get("enable_short_signals", False), merged.get("long_min_confidence", 85), merged.get("long_allow_ranging", False), merged.get("long_allow_mid_cap", False), merged.get("long_require_fvg", False), merged.get("long_prefer_fvg", True), merged.get("long_peak_distance_atr", 0.35), merged.get("long_max_extension_atr", 1.5), merged.get("fee_rate", 0.0004), merged.get("slippage_rate", 0.0002), merged.get("account_equity")]
             current_id = current.get("id")
             if current_id:
                 assignments = ", ".join([f"{field} = %s" for field in fields])

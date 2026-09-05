@@ -223,6 +223,7 @@ def apply_signal_filters(
     long_allow_ranging: bool = False,
     long_allow_mid_cap: bool = False,
     long_require_fvg: bool = False,
+    long_prefer_fvg: bool = True,
     long_peak_lookback: int = 20,
     long_peak_distance_atr: float = 0.35,
     long_max_extension_atr: float = 1.5,
@@ -242,8 +243,22 @@ def apply_signal_filters(
             vetoes.append("LONG ممنوع في نظام RANGING")
         if not long_allow_mid_cap and filtered.get("asset_profile") == "mid_cap":
             vetoes.append("LONG ممنوع للأصول من ملف mid_cap")
-        if long_require_fvg and not filtered.get("fvg_retest_ready"):
-            vetoes.append("LONG يحتاج إعادة اختبار FVG صاعد غير ممتلئ")
+        fvg_valid = filtered.get("fvg_state") == "BULLISH" and bool(filtered.get("fvg_retest_ready"))
+        if long_prefer_fvg:
+            if fvg_valid:
+                filtered["entry_path"] = "FVG_PRIORITY"
+            else:
+                fallback_missing = []
+                if filtered.get("regime") != "TRENDING_UP":
+                    fallback_missing.append("TRENDING_UP")
+                if filtered.get("momentum") != "CONFIRMED":
+                    fallback_missing.append("momentum")
+                if filtered.get("volume") != "CONFIRMED":
+                    fallback_missing.append("volume")
+                if fallback_missing:
+                    vetoes.append("LONG بدون FVG يحتاج شروط المسار البديل: " + ", ".join(fallback_missing))
+                else:
+                    filtered["entry_path"] = "FALLBACK_CONFIRMATION"
         recent_high = filtered.get("recent_high")
         atr = float(filtered.get("atr") or 0)
         current = float(filtered.get("price") or 0)

@@ -14,6 +14,10 @@ class SignalFilterTests(unittest.TestCase):
             "confidence": 90,
             "regime": "TRENDING_UP",
             "asset_profile": "major",
+            "momentum": "CONFIRMED",
+            "volume": "CONFIRMED",
+            "fvg_state": "NONE",
+            "fvg_retest_ready": False,
             "reasons": [],
         }
         result.update(overrides)
@@ -45,14 +49,20 @@ class SignalFilterTests(unittest.TestCase):
         self.assertEqual(result["signal"], "NO TRADE")
         self.assertIn("LONG ممنوع للأصول من ملف mid_cap", result["filter_vetoes"])
 
-    def test_long_requires_fvg_when_enabled(self):
-        result = apply_signal_filters(self.base("LONG", fvg_retest_ready=False), long_require_fvg=True)
-        self.assertEqual(result["signal"], "NO TRADE")
-        self.assertIn("LONG يحتاج إعادة اختبار FVG صاعد غير ممتلئ", result["filter_vetoes"])
-
-    def test_long_passes_with_fvg_retest(self):
-        result = apply_signal_filters(self.base("LONG", fvg_retest_ready=True), long_require_fvg=True)
+    def test_long_without_fvg_uses_fallback_confirmation(self):
+        result = apply_signal_filters(self.base("LONG"), long_prefer_fvg=True)
         self.assertEqual(result["signal"], "LONG")
+        self.assertEqual(result["entry_path"], "FALLBACK_CONFIRMATION")
+
+    def test_long_without_fvg_is_blocked_when_fallback_confirmation_is_weak(self):
+        result = apply_signal_filters(self.base("LONG", momentum="WEAK"), long_prefer_fvg=True)
+        self.assertEqual(result["signal"], "NO TRADE")
+        self.assertTrue(any(veto.startswith("LONG بدون FVG يحتاج شروط المسار البديل") for veto in result["filter_vetoes"]))
+
+    def test_long_with_fvg_gets_priority_path(self):
+        result = apply_signal_filters(self.base("LONG", fvg_state="BULLISH", fvg_retest_ready=True), long_prefer_fvg=True)
+        self.assertEqual(result["signal"], "LONG")
+        self.assertEqual(result["entry_path"], "FVG_PRIORITY")
 
     def test_long_is_blocked_near_recent_high(self):
         result = apply_signal_filters(self.base("LONG", price=99.8, recent_high=100.0, atr=1.0))

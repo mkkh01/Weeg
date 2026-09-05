@@ -73,7 +73,7 @@ class MtfTests(unittest.TestCase):
                 main.settings, "long_allow_ranging", True
             ), patch.object(main.settings, "long_allow_mid_cap", True), patch.object(
                 main.settings, "long_require_fvg", False
-            ):
+            ), patch.object(main.settings, "long_prefer_fvg", False):
                 output = await _analyze_mtf("BTCUSDT")
                 self.assertEqual(output["signal"], "LONG")
                 self.assertTrue(output["ready"])
