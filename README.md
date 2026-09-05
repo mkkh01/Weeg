@@ -43,3 +43,9 @@ The default deployment disables automatic SHORT signals and applies conservative
 Supported environment variables include `ENABLE_SHORT_SIGNALS`, `LONG_MIN_CONFIDENCE`, `LONG_ALLOW_RANGING`, `LONG_ALLOW_MID_CAP`, `FEE_RATE`, `SLIPPAGE_RATE`, and optional `ACCOUNT_EQUITY`. When `ACCOUNT_EQUITY` is configured, the service records the risk amount, position size, and notional value derived from `RISK_PER_TRADE` and the entry-to-stop distance. Without it, the sizing fields remain null rather than implying a position size.
 
 Before deploying a version that writes the new trade and settings fields to Supabase, apply `migrations/006_execution_controls_and_risk.sql`. The migration is intentionally separate from the code change so production database changes remain explicit and reviewable.
+
+## Runtime schema safety
+
+When PostgreSQL is configured, the application verifies persistent storage during startup and, by default, applies the additive runtime schema required by migration `006_execution_controls_and_risk.sql` before starting the automatic signal and trade-exit workers. Set `AUTO_MIGRATE_SCHEMA=false` only when schema changes are managed externally and have already been applied. If the runtime migration fails, persistent storage is marked unavailable and background writers remain paused instead of repeatedly failing writes.
+
+Telegram polling errors now include the HTTP status and Telegram API description in logs. Notification/control failures are retried with backoff and remain isolated from the trading and storage loops.

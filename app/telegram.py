@@ -27,8 +27,13 @@ class TelegramNotifier:
             return {"ok": False, "description": "Telegram غير مهيأ"}
         async with httpx.AsyncClient(timeout=35) as client:
             response = await client.post(self._url(method), json=payload)
-            response.raise_for_status()
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError:
+                data = {"description": response.text[:300]}
+            if response.is_error:
+                description = data.get("description", "HTTP error")
+                raise RuntimeError(f"Telegram HTTP {response.status_code}: {description}")
         if not data.get("ok"):
             raise RuntimeError(f"Telegram API {method}: {data.get('description', 'unknown error')}")
         return data
@@ -329,5 +334,5 @@ class TelegramBotController:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.warning("telegram controls polling failed: %s", type(exc).__name__)
+                log.warning("telegram controls polling failed: %s", exc)
                 await asyncio.sleep(5)

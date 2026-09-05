@@ -135,6 +135,40 @@ class Store:
             response.raise_for_status()
             return response.json()
 
+    async def ensure_runtime_schema(self) -> bool:
+        """Ensure additive runtime columns exist before background writers start.
+
+        This mirrors migrations/006_execution_controls_and_risk.sql and is intentionally
+        idempotent so a Render deploy cannot run the new writer against the old schema.
+        """
+        if not self.database_url:
+            return True
+        statements = (
+            """alter table public.weeg_settings
+               add column if not exists enable_short_signals boolean not null default false,
+               add column if not exists long_min_confidence integer not null default 85,
+               add column if not exists long_allow_ranging boolean not null default false,
+               add column if not exists long_allow_mid_cap boolean not null default false,
+               add column if not exists fee_rate numeric not null default 0.0004,
+               add column if not exists slippage_rate numeric not null default 0.0002,
+               add column if not exists account_equity numeric""",
+            """alter table public.weeg_trades
+               add column if not exists signal_before_filters text,
+               add column if not exists filter_vetoes jsonb not null default '[]'::jsonb,
+               add column if not exists gross_pnl numeric,
+               add column if not exists fees_and_slippage_pct numeric,
+               add column if not exists risk_amount numeric,
+               add column if not exists position_size numeric,
+               add column if not exists notional numeric""",
+        )
+        try:
+            for statement in statements:
+                await self._pg_query(statement, fetch="none")
+            return True
+        except Exception as exc:
+            self.storage_last_error = f"schema_migration_{type(exc).__name__}"
+            return False
+
     async def check_persistent_storage(self) -> bool:
         self.storage_last_check_at = datetime.now(timezone.utc).isoformat()
         errors = []

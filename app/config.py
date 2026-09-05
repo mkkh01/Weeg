@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     fee_rate: float = 0.0004
     slippage_rate: float = 0.0002
     account_equity: float | None = None
+    auto_migrate_schema: bool = True
     database_path: str = "weeg.db"
     vapid_private_key: str | None = None
     vapid_subject: str = "mailto:weeg-notifications@example.com"

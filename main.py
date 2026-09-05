@@ -363,6 +363,10 @@ async def _manage_open_trades():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await store.check_persistent_storage()
+    if settings.auto_migrate_schema and store.postgres_configured and store.has_persistent_storage:
+        if not await store.ensure_runtime_schema():
+            store.persistent_storage_ready = False
+            log.error("runtime schema migration failed; background writers are paused: %s", store.storage_last_error)
     await market.start()
     auto_task = asyncio.create_task(_auto_signal_loop())
     telegram_task = asyncio.create_task(telegram_bot.run()) if telegram_bot.configured else None
@@ -438,6 +442,7 @@ async def health(response: Response):
         "storage_last_check_at": store.storage_last_check_at,
         "telegram_notifications_enabled": telegram_notifier.configured,
         "telegram_controls_enabled": telegram_bot.configured,
+        "auto_migrate_schema": settings.auto_migrate_schema,
         "auto_signal_enabled": persistent,
         "auto_signal_storage": persistent,
         "warning": None if persistent else "التخزين الدائم غير جاهز؛ الفحص الآلي ينتظر اتصال Supabase ولن يحفظ صفقات في SQLite المؤقت",
