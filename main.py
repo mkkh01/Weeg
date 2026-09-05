@@ -10,14 +10,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.data.market import MarketData
-from app.analysis.engine import analyze
+from app.analysis.engine import analyze, apply_signal_filters
 from app.analysis.backtest import run_backtest
 from app.storage.store import Store
 from app.notifications import PushNotifier
 from app.telegram import TelegramBotController, TelegramNotifier
 
 settings = get_settings()
-market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["15m", "1h", "4h"])
+market = MarketData(settings.binance_rest_url, settings.binance_ws_url, settings.symbol_list, settings.default_interval, ["1m", "15m", "1h", "4h"])
 store = Store(settings.database_path, settings.supabase_http_url, settings.supabase_auth_keys, settings.redis_url, settings.postgres_dsn)
 push_notifier = PushNotifier(store, settings.vapid_private_key, settings.vapid_subject)
 telegram_notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
@@ -65,6 +65,13 @@ class SettingsInput(BaseModel):
     confidence_threshold: int | None = None
     minimum_rr: float | None = None
     risk_per_trade: float | None = None
+    enable_short_signals: bool | None = None
+    long_min_confidence: int | None = None
+    long_allow_ranging: bool | None = None
+    long_allow_mid_cap: bool | None = None
+    fee_rate: float | None = None
+    slippage_rate: float | None = None
+    account_equity: float | None = None
 
 
 class PushSubscriptionInput(BaseModel):
@@ -79,6 +86,31 @@ MTF_INTERVALS = ("4h", "1h", "15m")
 
 def _opposite(direction: str) -> str:
     return "SHORT" if direction == "LONG" else "LONG"
+
+
+def _apply_deployment_filters(result: dict) -> dict:
+    return apply_signal_filters(
+        result,
+        enable_short=settings.enable_short_signals,
+        long_min_confidence=settings.long_min_confidence,
+        long_allow_ranging=settings.long_allow_ranging,
+        long_allow_mid_cap=settings.long_allow_mid_cap,
+    )
+
+
+def _trade_sizing(entry: float, stop_loss: float) -> dict:
+    if settings.account_equity is None or settings.account_equity <= 0:
+        return {"risk_amount": None, "position_size": None, "notional": None}
+    risk_amount = settings.account_equity * settings.risk_per_trade
+    stop_distance = abs(entry - stop_loss)
+    if stop_distance <= 0:
+        return {"risk_amount": risk_amount, "position_size": None, "notional": None}
+    position_size = risk_amount / stop_distance
+    return {
+        "risk_amount": round(risk_amount, 8),
+        "position_size": round(position_size, 8),
+        "notional": round(position_size * entry, 8),
+    }
 
 
 async def _analyze_mtf(symbol: str) -> dict:
@@ -129,7 +161,7 @@ async def _analyze_mtf(symbol: str) -> dict:
             *vetoes,
             "تم رفض الإشارة: يجب تطابق اتجاه 4h و1h و15m وجاهزية الفريمات الثلاثة",
         ]
-    return entry
+    return _apply_deployment_filters(entry)
 
 
 async def _scan_and_store_auto_signals() -> list[dict]:
@@ -171,6 +203,9 @@ async def _scan_and_store_auto_signals() -> list[dict]:
                 "mtf_alignment": result.get("mtf_alignment"),
                 "mtf_vetoes": result.get("mtf_vetoes", []),
                 "mtf_timeframes": result.get("timeframes", {}),
+                "signal_before_filters": result.get("signal_before_filters"),
+                "filter_vetoes": result.get("filter_vetoes", []),
+                **_trade_sizing(result["entry"], result["stop_loss"]),
             }
             saved_trade = await store.create_trade(trade)
             saved.append(saved_trade)
@@ -258,7 +293,7 @@ async def _auto_signal_loop():
         await asyncio.sleep(delay)
 
 
-def evaluate_trade_exit(trade: dict, current_price: float) -> dict | None:
+def evaluate_trade_exit(trade: dict, current_price: float, current_candle: dict | None = None) -> dict | None:
     try:
         current = float(current_price)
         entry = float(trade["entry"])
@@ -268,26 +303,34 @@ def evaluate_trade_exit(trade: dict, current_price: float) -> dict | None:
         return None
 
     direction = trade.get("direction")
+    candle_high = float(current_candle.get("high", current)) if current_candle else current
+    candle_low = float(current_candle.get("low", current)) if current_candle else current
     if direction == "LONG":
-        stopped = current <= stop_loss
-        target_hit = current >= take_profit_1
-        gross_pnl = (current - entry) / max(abs(entry), 1e-9) * 100
+        stopped = current <= stop_loss or candle_low <= stop_loss
+        target_hit = current >= take_profit_1 or candle_high >= take_profit_1
+        gross_exit = stop_loss if stopped else take_profit_1 if target_hit else current
+        gross_pnl = (gross_exit - entry) / max(abs(entry), 1e-9) * 100
     elif direction == "SHORT":
-        stopped = current >= stop_loss
-        target_hit = current <= take_profit_1
-        gross_pnl = (entry - current) / max(abs(entry), 1e-9) * 100
+        stopped = current >= stop_loss or candle_high >= stop_loss
+        target_hit = current <= take_profit_1 or candle_low <= take_profit_1
+        gross_exit = stop_loss if stopped else take_profit_1 if target_hit else current
+        gross_pnl = (entry - gross_exit) / max(abs(entry), 1e-9) * 100
     else:
         return None
 
     if not stopped and not target_hit:
         return None
     reason = "STOP_LOSS" if stopped else "TAKE_PROFIT_1"
+    fee_pct = settings.fee_rate * 2 + settings.slippage_rate
+    net_pnl = gross_pnl - fee_pct * 100
     return {
         "status": "STOPPED" if stopped else "CLOSED",
         "result": "LOSS" if stopped else "WIN",
-        "pnl": round(gross_pnl, 8),
+        "gross_pnl": round(gross_pnl, 8),
+        "fees_and_slippage_pct": round(fee_pct * 100, 8),
+        "pnl": round(net_pnl, 8),
         "exit_reason": reason,
-        "exit_price": round(current, 8),
+        "exit_price": round(gross_exit if current_candle else current, 8),
         "closed_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -300,7 +343,9 @@ async def _manage_open_trades():
                 price = market.tickers.get(symbol, {}).get("price")
                 if not symbol or price is None:
                     continue
-                patch = evaluate_trade_exit(trade, price)
+                candle_rows = market.candles.get((symbol, "1m"), ())
+                current_candle = candle_rows[-1] if candle_rows else None
+                patch = evaluate_trade_exit(trade, price, current_candle)
                 if not patch:
                     continue
                 updated = await store.update_trade(str(trade["id"]), patch)
@@ -458,6 +503,12 @@ async def summary_cycle(response: Response):
             "scan_seconds": AUTO_SCAN_SECONDS,
             "confidence_threshold": settings.confidence_threshold,
             "minimum_rr": settings.minimum_rr,
+            "enable_short_signals": settings.enable_short_signals,
+            "long_min_confidence": settings.long_min_confidence,
+            "long_allow_ranging": settings.long_allow_ranging,
+            "long_allow_mid_cap": settings.long_allow_mid_cap,
+            "fee_rate": settings.fee_rate,
+            "slippage_rate": settings.slippage_rate,
         },
     }
 
@@ -477,6 +528,7 @@ async def overview(interval: str = "15m"):
             else:
                 rows = await market.ensure_history(symbol, interval)
                 result = analyze(symbol, rows, interval, settings.confidence_threshold, settings.minimum_rr)
+                result = _apply_deployment_filters(result)
             result["ticker"] = market.tickers.get(symbol, {})
             return result
         except Exception as exc:
@@ -489,12 +541,24 @@ async def signal(symbol: str, interval: str = "15m"):
     if interval == "15m":
         return await _analyze_mtf(symbol)
     rows = await market.ensure_history(symbol, interval)
-    return analyze(symbol, rows, interval, settings.confidence_threshold, settings.minimum_rr)
+    return _apply_deployment_filters(analyze(symbol, rows, interval, settings.confidence_threshold, settings.minimum_rr))
 
 @app.get("/api/backtest/{symbol}")
 async def backtest(symbol: str, interval: str = "15m", limit: int = 500):
     symbol = symbol.upper(); rows = await market.ensure_history(symbol, interval)
-    return run_backtest(symbol, rows[-min(limit, 500):], interval, threshold=settings.confidence_threshold, minimum_rr=settings.minimum_rr)
+    return run_backtest(
+        symbol,
+        rows[-min(limit, 500):],
+        interval,
+        fee_rate=settings.fee_rate,
+        slippage=settings.slippage_rate,
+        threshold=settings.confidence_threshold,
+        minimum_rr=settings.minimum_rr,
+        enable_short=settings.enable_short_signals,
+        long_min_confidence=settings.long_min_confidence,
+        long_allow_ranging=settings.long_allow_ranging,
+        long_allow_mid_cap=settings.long_allow_mid_cap,
+    )
 
 @app.get("/api/trades")
 async def trades(status: str | None = None): return await store.list_trades(status.upper() if status else None)
@@ -514,13 +578,19 @@ async def update_trade(trade_id: str, patch: dict):
 @app.get("/api/settings")
 async def get_app_settings():
     saved = await store.get_settings()
-    return {"symbols": settings.symbol_list, "confidence_threshold": settings.confidence_threshold, "minimum_rr": settings.minimum_rr, "risk_per_trade": settings.risk_per_trade, **saved}
+    return {"symbols": settings.symbol_list, "confidence_threshold": settings.confidence_threshold, "minimum_rr": settings.minimum_rr, "risk_per_trade": settings.risk_per_trade, "enable_short_signals": settings.enable_short_signals, "long_min_confidence": settings.long_min_confidence, "long_allow_ranging": settings.long_allow_ranging, "long_allow_mid_cap": settings.long_allow_mid_cap, "fee_rate": settings.fee_rate, "slippage_rate": settings.slippage_rate, "account_equity": settings.account_equity, **saved}
 
 @app.post("/api/settings")
 async def save_app_settings(payload: SettingsInput):
     data = payload.model_dump(exclude_none=True)
-    if "symbols" in data: data["symbols"] = [s.upper() for s in data["symbols"]]
-    return await store.save_settings(data)
+    if "symbols" in data:
+        data["symbols"] = [s.upper() for s in data["symbols"]]
+    for key, value in data.items():
+        if hasattr(settings, key):
+            setattr(settings, key, value)
+    market.symbols = settings.symbol_list
+    saved = await store.save_settings(data)
+    return {**saved, **{key: getattr(settings, key) for key in data if hasattr(settings, key)}}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

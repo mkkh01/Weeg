@@ -1,14 +1,20 @@
 from __future__ import annotations
 from typing import Any
-from .engine import analyze
+from .engine import analyze, apply_signal_filters
 
 
-def run_backtest(symbol: str, candles: list[dict[str, Any]], interval: str = "15m", fee_rate: float = 0.0004, slippage: float = 0.0002, threshold: int = 65, minimum_rr: float = 2.0, split: float = 0.7) -> dict[str, Any]:
+def run_backtest(symbol: str, candles: list[dict[str, Any]], interval: str = "15m", fee_rate: float = 0.0004, slippage: float = 0.0002, threshold: int = 65, minimum_rr: float = 2.0, split: float = 0.7, enable_short: bool = False, long_min_confidence: int = 85, long_allow_ranging: bool = False, long_allow_mid_cap: bool = False) -> dict[str, Any]:
     if len(candles) < 80:
         return {"error": "تحتاج المحاكاة إلى 80 شمعة على الأقل"}
     cut = max(60, int(len(candles) * split)); trades = []; equity = 0.0; peak = 0.0; max_dd = 0.0
     for i in range(cut, len(candles)):
-        signal = analyze(symbol, candles[:i], interval, threshold, minimum_rr)
+        signal = apply_signal_filters(
+            analyze(symbol, candles[:i], interval, threshold, minimum_rr),
+            enable_short=enable_short,
+            long_min_confidence=long_min_confidence,
+            long_allow_ranging=long_allow_ranging,
+            long_allow_mid_cap=long_allow_mid_cap,
+        )
         if signal.get("signal") not in ("LONG", "SHORT"): continue
         entry = float(candles[i]["open"]); direction = signal["signal"]
         sl = float(signal["stop_loss"]); tp = float(signal["take_profit_1"]); exit_price = float(candles[i]["close"]); reason = "CLOSE"

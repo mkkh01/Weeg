@@ -177,3 +177,38 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "ready": signal in ("LONG", "SHORT"),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def apply_signal_filters(
+    result: dict[str, Any],
+    *,
+    enable_short: bool = False,
+    long_min_confidence: int = 85,
+    long_allow_ranging: bool = False,
+    long_allow_mid_cap: bool = False,
+) -> dict[str, Any]:
+    """Apply deployment-level directional filters without changing raw indicator output."""
+    filtered = dict(result)
+    signal = filtered.get("signal")
+    reasons = list(filtered.get("reasons") or [])
+    vetoes = []
+    if signal == "SHORT" and not enable_short:
+        vetoes.append("SHORT معطل تشغيليًا")
+    if signal == "LONG":
+        confidence = float(filtered.get("confidence") or 0)
+        if confidence < long_min_confidence:
+            vetoes.append(f"الثقة أقل من {long_min_confidence} المطلوبة لـ LONG")
+        if not long_allow_ranging and filtered.get("regime") == "RANGING":
+            vetoes.append("LONG ممنوع في نظام RANGING")
+        if not long_allow_mid_cap and filtered.get("asset_profile") == "mid_cap":
+            vetoes.append("LONG ممنوع للأصول من ملف mid_cap")
+    if vetoes:
+        filtered["signal_before_filters"] = signal
+        filtered["signal"] = "NO TRADE"
+        filtered["ready"] = False
+        filtered["filter_vetoes"] = vetoes
+        filtered["reasons"] = [*reasons, *vetoes]
+    else:
+        filtered.setdefault("signal_before_filters", signal)
+        filtered.setdefault("filter_vetoes", [])
+    return filtered

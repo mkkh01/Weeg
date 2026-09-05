@@ -49,6 +49,13 @@ class TradeExitTests(unittest.TestCase):
         self.assertIsNone(evaluate_trade_exit(make_trade("LONG"), 102.0))
         self.assertIsNone(evaluate_trade_exit(make_trade("SHORT"), 98.0))
 
+    def test_long_detects_intrabar_target_and_applies_costs(self):
+        result = evaluate_trade_exit(make_trade("LONG"), 102.0, {"high": 110.0, "low": 101.0})
+        self.assertEqual(result["exit_reason"], "TAKE_PROFIT_1")
+        self.assertEqual(result["exit_price"], 110.0)
+        self.assertAlmostEqual(result["gross_pnl"], 10.0)
+        self.assertAlmostEqual(result["pnl"], 9.9)
+
 
 if __name__ == "__main__":
     unittest.main()

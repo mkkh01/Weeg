@@ -35,3 +35,11 @@ The browser provides a TradingView-inspired layout without copying TradingView's
 كل صفقة آلية تحمل `source=auto_signal` و`auto_created=true` وملف الأصل وأسباب الإشارة. يمنع النظام تكرار صفقة آلية نشطة لنفس الزوج والإطار الزمني، بينما تفحص إدارة الخروج جميع الصفقات `PENDING` و`OPEN` و`PARTIAL` كل 5 ثوانٍ باستخدام سعر Binance اللحظي؛ وتغلق الصفقة عند `TAKE_PROFIT_1` أو `STOP_LOSS` وتخزن سبب الخروج والربح/الخسارة. بعد الإغلاق يمكن للفحص التالي إنشاء إشارة آلية جديدة إذا ظلت شروط الإشارة مستوفاة.
 
 يستخدم التطبيق مصدر Binance Spot موحدًا للسعر الحالي: يغذي WebSocket أحداث `@ticker` و`@kline_1m`، ويعرض السعر نفسه في خانة السعر الحالي وآخر شمعة على الشارت. طُبق قيد الصفقة النشطة في `migrations/002_auto_signal_trades.sql`.
+
+## Execution controls and directional filters
+
+The default deployment disables automatic SHORT signals and applies conservative LONG filters: confidence must be at least 85, ranging regimes are rejected, and `mid_cap` assets are rejected. These defaults can be overridden with environment variables or through the settings API after applying migration `006_execution_controls_and_risk.sql`.
+
+Supported environment variables include `ENABLE_SHORT_SIGNALS`, `LONG_MIN_CONFIDENCE`, `LONG_ALLOW_RANGING`, `LONG_ALLOW_MID_CAP`, `FEE_RATE`, `SLIPPAGE_RATE`, and optional `ACCOUNT_EQUITY`. When `ACCOUNT_EQUITY` is configured, the service records the risk amount, position size, and notional value derived from `RISK_PER_TRADE` and the entry-to-stop distance. Without it, the sizing fields remain null rather than implying a position size.
+
+Before deploying a version that writes the new trade and settings fields to Supabase, apply `migrations/006_execution_controls_and_risk.sql`. The migration is intentionally separate from the code change so production database changes remain explicit and reviewable.

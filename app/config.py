@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     confidence_threshold: int = 65
     minimum_rr: float = 2.0
     risk_per_trade: float = 0.005
+    enable_short_signals: bool = False
+    long_min_confidence: int = 85
+    long_allow_ranging: bool = False
+    long_allow_mid_cap: bool = False
+    fee_rate: float = 0.0004
+    slippage_rate: float = 0.0002
+    account_equity: float | None = None
     database_path: str = "weeg.db"
     vapid_private_key: str | None = None
     vapid_subject: str = "mailto:weeg-notifications@example.com"

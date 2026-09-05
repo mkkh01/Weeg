@@ -14,7 +14,8 @@ class Store:
         "structure_state", "liquidity_state", "fvg_state", "volume_state", "momentum_state",
         "status", "result", "pnl", "max_favorable_excursion", "max_adverse_excursion",
         "exit_reason", "exit_price", "created_at", "closed_at", "source", "auto_created", "asset_profile",
-        "signal_reasons", "mtf_alignment", "mtf_vetoes", "mtf_timeframes",
+        "signal_reasons", "mtf_alignment", "mtf_vetoes", "mtf_timeframes", "signal_before_filters", "filter_vetoes",
+        "gross_pnl", "fees_and_slippage_pct", "risk_amount", "position_size", "notional",
     }
     PG_UPDATE_FIELDS = PG_TRADE_FIELDS - {"id", "created_at"}
 
@@ -340,7 +341,7 @@ class Store:
 
     @staticmethod
     def _pg_value(field: str, value: Any) -> Any:
-        if field in {"signal_reasons", "mtf_vetoes", "mtf_timeframes"}:
+        if field in {"signal_reasons", "mtf_vetoes", "mtf_timeframes", "filter_vetoes"}:
             try:
                 from psycopg.types.json import Jsonb
                 return Jsonb(value if value is not None else [])
@@ -406,8 +407,8 @@ class Store:
             current = await self.get_settings()
             merged = {**current, **settings}
             symbols = merged.get("symbols") or []
-            fields = ["symbols", "macro_timeframe", "trend_timeframe", "confirmation_timeframe", "execution_timeframe", "risk_per_trade", "minimum_rr", "confidence_threshold"]
-            values = [merged.get("symbols", symbols), merged.get("macro_timeframe", "4h"), merged.get("trend_timeframe", "1h"), merged.get("confirmation_timeframe", "15m"), merged.get("execution_timeframe", "5m"), merged.get("risk_per_trade", 0.005), merged.get("minimum_rr", 2.0), merged.get("confidence_threshold", 65)]
+            fields = ["symbols", "macro_timeframe", "trend_timeframe", "confirmation_timeframe", "execution_timeframe", "risk_per_trade", "minimum_rr", "confidence_threshold", "enable_short_signals", "long_min_confidence", "long_allow_ranging", "long_allow_mid_cap", "fee_rate", "slippage_rate", "account_equity"]
+            values = [merged.get("symbols", symbols), merged.get("macro_timeframe", "4h"), merged.get("trend_timeframe", "1h"), merged.get("confirmation_timeframe", "15m"), merged.get("execution_timeframe", "5m"), merged.get("risk_per_trade", 0.005), merged.get("minimum_rr", 2.0), merged.get("confidence_threshold", 65), merged.get("enable_short_signals", False), merged.get("long_min_confidence", 85), merged.get("long_allow_ranging", False), merged.get("long_allow_mid_cap", False), merged.get("fee_rate", 0.0004), merged.get("slippage_rate", 0.0002), merged.get("account_equity")]
             current_id = current.get("id")
             if current_id:
                 assignments = ", ".join([f"{field} = %s" for field in fields])

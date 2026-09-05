@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import main
 from main import _analyze_mtf
 
 
@@ -68,7 +69,9 @@ class MtfTests(unittest.TestCase):
             with patch("main.market.ensure_history", new=AsyncMock(return_value=[])), patch(
                 "main.analyze",
                 side_effect=lambda symbol, rows, interval, threshold, minimum_rr: result("LONG", "LONG", ready=True),
-            ):
+            ), patch.object(main.settings, "long_min_confidence", 80), patch.object(
+                main.settings, "long_allow_ranging", True
+            ), patch.object(main.settings, "long_allow_mid_cap", True):
                 output = await _analyze_mtf("BTCUSDT")
                 self.assertEqual(output["signal"], "LONG")
                 self.assertTrue(output["ready"])
