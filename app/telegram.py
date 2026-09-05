@@ -264,21 +264,23 @@ class TelegramBotController:
         )
 
     async def render_performance(self) -> str:
-        closed = await self.store.list_trades("CLOSED_OR_STOPPED")
-        open_trades = await self.store.list_active_trades()
-        wins = sum(1 for trade in closed if (trade.get("result") or ("WIN" if trade.get("status") == "CLOSED" else "LOSS")) == "WIN")
-        losses = sum(1 for trade in closed if (trade.get("result") or ("WIN" if trade.get("status") == "CLOSED" else "LOSS")) == "LOSS")
-        total_pnl = sum(float(trade.get("pnl") or 0) for trade in closed)
-        win_rate = (wins / len(closed) * 100) if closed else 0
+        summary = await self.store.trade_performance_summary()
+        open_count = summary["open_count"]
+        closed_count = summary["closed_count"]
+        wins = summary["wins"]
+        losses = summary["losses"]
+        total_pnl = summary["total_pnl"]
+        win_rate = (wins / closed_count * 100) if closed_count else 0
         return "\n".join(
             (
                 "Weeg | أداء النظام",
                 "",
-                f"الصفقات المفتوحة: {len(open_trades)}",
-                f"الصفقات المغلقة: {len(closed)}",
+                f"الصفقات المفتوحة: {open_count}",
+                f"الصفقات المغلقة: {closed_count}",
                 f"الفوز: {wins} | الخسارة: {losses}",
                 f"نسبة الفوز: {win_rate:.2f}%",
                 f"إجمالي PnL المسجل: {total_pnl:.4f}%",
+                f"نطاق الإحصاء: {'كامل السجل' if summary.get('complete') else 'السجل المتاح'}",
                 f"التخزين: {self.store.backend_name}",
                 f"التغذية الحية: {'مفعّلة' if self.market.health_snapshot().get('live_feed') else 'متوقفة'}",
                 f"الفحص الآلي: {'مفعّل' if self.store.has_persistent_storage else 'متوقف'}",

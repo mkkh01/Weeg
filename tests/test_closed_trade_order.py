@@ -6,6 +6,20 @@ from app.storage.store import Store
 
 
 class ClosedTradeOrderTests(unittest.TestCase):
+    def test_performance_summary_uses_full_database_aggregate(self):
+        async def run():
+            store = Store(":memory:", database_url="postgresql://example.invalid/weeg")
+            store._pg_query = AsyncMock(return_value={"open_count": 2, "closed_count": 350, "wins": 140, "losses": 210, "total_pnl": "42.5"})
+            summary = await store.trade_performance_summary()
+            self.assertEqual(summary["closed_count"], 350)
+            self.assertEqual(summary["wins"], 140)
+            self.assertEqual(summary["total_pnl"], 42.5)
+            query = store._pg_query.await_args.args[0]
+            self.assertIn("count(*) filter", query)
+            self.assertIn("sum(pnl)", query)
+
+        asyncio.run(run())
+
     def test_closed_trades_are_ordered_by_closed_at(self):
         async def run():
             store = Store(":memory:", database_url="postgresql://example.invalid/weeg")

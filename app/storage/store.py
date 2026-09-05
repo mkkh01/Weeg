@@ -205,6 +205,38 @@ class Store:
         self.storage_last_error = ";".join(errors) or "persistent_storage_not_configured"
         return False
 
+    async def trade_performance_summary(self) -> dict[str, Any]:
+        if self.database_url:
+            query = """
+                select
+                  count(*) filter (where status in ('PENDING','OPEN','PARTIAL'))::int as open_count,
+                  count(*) filter (where status in ('CLOSED','STOPPED'))::int as closed_count,
+                  count(*) filter (where status in ('CLOSED','STOPPED') and (result = 'WIN' or (result is null and status = 'CLOSED')))::int as wins,
+                  count(*) filter (where status in ('CLOSED','STOPPED') and (result = 'LOSS' or (result is null and status = 'STOPPED')))::int as losses,
+                  coalesce(sum(pnl) filter (where status in ('CLOSED','STOPPED')), 0)::numeric as total_pnl
+                from public.weeg_trades
+            """
+            row = await self._pg_query(query, fetch="one")
+            return {
+                "open_count": int(row.get("open_count") or 0),
+                "closed_count": int(row.get("closed_count") or 0),
+                "wins": int(row.get("wins") or 0),
+                "losses": int(row.get("losses") or 0),
+                "total_pnl": float(row.get("total_pnl") or 0),
+                "complete": True,
+            }
+        closed = await self.list_trades("CLOSED_OR_STOPPED")
+        open_trades = await self.list_active_trades()
+        wins = sum(1 for trade in closed if (trade.get("result") or ("WIN" if trade.get("status") == "CLOSED" else "LOSS")) == "WIN")
+        return {
+            "open_count": len(open_trades),
+            "closed_count": len(closed),
+            "wins": wins,
+            "losses": len(closed) - wins,
+            "total_pnl": sum(float(trade.get("pnl") or 0) for trade in closed),
+            "complete": False,
+        }
+
     async def list_trades(self, status: str | None = None) -> list[dict[str, Any]]:
         if self.database_url:
             query = "select * from public.weeg_trades"
