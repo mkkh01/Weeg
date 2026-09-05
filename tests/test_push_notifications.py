@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 from app.notifications import PushNotifier
@@ -28,6 +29,16 @@ class PushNotificationTests(unittest.TestCase):
                 self.assertEqual(await store.list_push_subscriptions(), [])
 
         asyncio.run(run())
+
+    def test_uuid_is_json_serializable_in_push_payload(self):
+        payload = PushNotifier._build_payload(
+            "title",
+            "body",
+            "trade-close",
+            {"event": "trade_closed", "trade_id": uuid.uuid4()},
+        )
+        self.assertIn('"event": "trade_closed"', payload)
+        self.assertNotIn("UUID is not JSON serializable", payload)
 
     def test_unconfigured_notifier_is_safe(self):
         async def run():

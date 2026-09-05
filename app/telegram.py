@@ -73,7 +73,7 @@ class TelegramNotifier:
         except Exception as exc:
             log.warning("telegram callback acknowledgement failed: %s", type(exc).__name__)
 
-    async def edit_message(self, chat_id: str, message_id: int, text: str, reply_markup: dict[str, Any]) -> None:
+    async def edit_message(self, chat_id: str, message_id: int, text: str, reply_markup: dict[str, Any]) -> bool:
         try:
             await self._api_call(
                 "editMessageText",
@@ -85,8 +85,10 @@ class TelegramNotifier:
                     "reply_markup": reply_markup,
                 },
             )
+            return True
         except Exception as exc:
-            log.warning("telegram message edit failed: %s", type(exc).__name__)
+            log.warning("telegram message edit failed: %s", exc)
+            return False
 
     @staticmethod
     def format_trade_opened(trade: dict[str, Any]) -> str:
@@ -312,7 +314,9 @@ class TelegramBotController:
             message_id = (callback.get("message") or {}).get("message_id")
             if message_id:
                 text = await self.render_callback(str(callback.get("data") or "menu"))
-                await self.notifier.edit_message(str(chat_id), int(message_id), text, self.menu_markup())
+                edited = await self.notifier.edit_message(str(chat_id), int(message_id), text, self.menu_markup())
+                if not edited:
+                    await self.notifier.send_message(text, self.menu_markup(), str(chat_id))
             return
         text = str(message.get("text") or "").strip()
         command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""

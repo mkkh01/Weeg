@@ -210,14 +210,17 @@ class Store:
             elif status:
                 query += " where status = %s"
                 params.append(status)
-            query += " order by signal_time desc limit 200"
+            if status == "CLOSED_OR_STOPPED":
+                query += " order by closed_at desc nulls last, created_at desc limit 200"
+            else:
+                query += " order by signal_time desc limit 200"
             try:
                 return self._decorate_trades(await self._pg_query(query, params))
             except Exception:
                 if self.persistent_storage_ready and self.storage_key_source == "postgres":
                     raise
         try:
-            params = {"select": "*", "order": "signal_time.desc", "limit": "200"}
+            params = {"select": "*", "order": ("closed_at.desc.nullslast,created_at.desc" if status == "CLOSED_OR_STOPPED" else "signal_time.desc"), "limit": "200"}
             if status == "CLOSED_OR_STOPPED":
                 params["status"] = "in.(CLOSED,STOPPED)"
             elif status:

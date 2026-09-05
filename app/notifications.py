@@ -37,18 +37,26 @@ class PushNotifier:
     def configured(self) -> bool:
         return bool(self.private_key and self.public_key)
 
+    @staticmethod
+    def _build_payload(title: str, body: str, tag: str, data: dict[str, Any] | None = None) -> str:
+        return json.dumps(
+            {
+                "title": title,
+                "body": body,
+                "tag": tag,
+                "data": data or {},
+                "url": "/",
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
     async def send(self, title: str, body: str, *, tag: str, data: dict[str, Any] | None = None) -> dict[str, int]:
         if not self.configured:
             return {"sent": 0, "failed": 0, "removed": 0}
         subscriptions = await self.store.list_push_subscriptions()
         sent = failed = removed = 0
-        payload = json.dumps({
-            "title": title,
-            "body": body,
-            "tag": tag,
-            "data": data or {},
-            "url": "/",
-        }, ensure_ascii=False)
+        payload = self._build_payload(title, body, tag, data)
         for subscription in subscriptions:
             try:
                 await asyncio.to_thread(self._send_one, subscription, payload)
