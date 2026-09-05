@@ -71,7 +71,9 @@ class MtfTests(unittest.TestCase):
                 side_effect=lambda symbol, rows, interval, threshold, minimum_rr: result("LONG", "LONG", ready=True),
             ), patch.object(main.settings, "long_min_confidence", 80), patch.object(
                 main.settings, "long_allow_ranging", True
-            ), patch.object(main.settings, "long_allow_mid_cap", True):
+            ), patch.object(main.settings, "long_allow_mid_cap", True), patch.object(
+                main.settings, "long_require_fvg", False
+            ):
                 output = await _analyze_mtf("BTCUSDT")
                 self.assertEqual(output["signal"], "LONG")
                 self.assertTrue(output["ready"])

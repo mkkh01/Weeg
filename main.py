@@ -69,6 +69,9 @@ class SettingsInput(BaseModel):
     long_min_confidence: int | None = None
     long_allow_ranging: bool | None = None
     long_allow_mid_cap: bool | None = None
+    long_require_fvg: bool | None = None
+    long_peak_distance_atr: float | None = None
+    long_max_extension_atr: float | None = None
     fee_rate: float | None = None
     slippage_rate: float | None = None
     account_equity: float | None = None
@@ -95,6 +98,9 @@ def _apply_deployment_filters(result: dict) -> dict:
         long_min_confidence=settings.long_min_confidence,
         long_allow_ranging=settings.long_allow_ranging,
         long_allow_mid_cap=settings.long_allow_mid_cap,
+        long_require_fvg=settings.long_require_fvg,
+        long_peak_distance_atr=settings.long_peak_distance_atr,
+        long_max_extension_atr=settings.long_max_extension_atr,
     )
 
 
@@ -193,6 +199,7 @@ async def _scan_and_store_auto_signals() -> list[dict]:
                 "regime": result["regime"],
                 "structure_state": result.get("structure"),
                 "liquidity_state": result.get("liquidity"),
+                "fvg_state": result.get("fvg_state", "UNKNOWN"),
                 "volume_state": result.get("volume"),
                 "momentum_state": result.get("momentum"),
                 "status": "OPEN",
@@ -512,6 +519,9 @@ async def summary_cycle(response: Response):
             "long_min_confidence": settings.long_min_confidence,
             "long_allow_ranging": settings.long_allow_ranging,
             "long_allow_mid_cap": settings.long_allow_mid_cap,
+            "long_require_fvg": settings.long_require_fvg,
+            "long_peak_distance_atr": settings.long_peak_distance_atr,
+            "long_max_extension_atr": settings.long_max_extension_atr,
             "fee_rate": settings.fee_rate,
             "slippage_rate": settings.slippage_rate,
         },
@@ -563,6 +573,9 @@ async def backtest(symbol: str, interval: str = "15m", limit: int = 500):
         long_min_confidence=settings.long_min_confidence,
         long_allow_ranging=settings.long_allow_ranging,
         long_allow_mid_cap=settings.long_allow_mid_cap,
+        long_require_fvg=settings.long_require_fvg,
+        long_peak_distance_atr=settings.long_peak_distance_atr,
+        long_max_extension_atr=settings.long_max_extension_atr,
     )
 
 @app.get("/api/trades")
@@ -583,7 +596,7 @@ async def update_trade(trade_id: str, patch: dict):
 @app.get("/api/settings")
 async def get_app_settings():
     saved = await store.get_settings()
-    return {"symbols": settings.symbol_list, "confidence_threshold": settings.confidence_threshold, "minimum_rr": settings.minimum_rr, "risk_per_trade": settings.risk_per_trade, "enable_short_signals": settings.enable_short_signals, "long_min_confidence": settings.long_min_confidence, "long_allow_ranging": settings.long_allow_ranging, "long_allow_mid_cap": settings.long_allow_mid_cap, "fee_rate": settings.fee_rate, "slippage_rate": settings.slippage_rate, "account_equity": settings.account_equity, **saved}
+    return {"symbols": settings.symbol_list, "confidence_threshold": settings.confidence_threshold, "minimum_rr": settings.minimum_rr, "risk_per_trade": settings.risk_per_trade, "enable_short_signals": settings.enable_short_signals, "long_min_confidence": settings.long_min_confidence, "long_allow_ranging": settings.long_allow_ranging, "long_allow_mid_cap": settings.long_allow_mid_cap, "long_require_fvg": settings.long_require_fvg, "long_peak_distance_atr": settings.long_peak_distance_atr, "long_max_extension_atr": settings.long_max_extension_atr, "fee_rate": settings.fee_rate, "slippage_rate": settings.slippage_rate, "account_equity": settings.account_equity, **saved}
 
 @app.post("/api/settings")
 async def save_app_settings(payload: SettingsInput):

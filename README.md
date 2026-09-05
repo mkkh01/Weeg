@@ -49,3 +49,7 @@ Before deploying a version that writes the new trade and settings fields to Supa
 When PostgreSQL is configured, the application verifies persistent storage during startup and, by default, applies the additive runtime schema required by migration `006_execution_controls_and_risk.sql` before starting the automatic signal and trade-exit workers. Set `AUTO_MIGRATE_SCHEMA=false` only when schema changes are managed externally and have already been applied. If the runtime migration fails, persistent storage is marked unavailable and background writers remain paused instead of repeatedly failing writes.
 
 Telegram polling errors now include the HTTP status and Telegram API description in logs. Notification/control failures are retried with backoff and remain isolated from the trading and storage loops.
+
+## LONG entry-quality policy
+
+LONG signals are blocked in `RANGING` by default. The entry-quality layer also rejects a LONG when the current price is within `0.35 × ATR` of the recent 20-candle high or when price is more than `1.5 × ATR` above EMA20. By default, a LONG must also have an unfilled bullish FVG with the current price in or near its retest zone. These thresholds are configurable through `LONG_REQUIRE_FVG`, `LONG_PEAK_DISTANCE_ATR`, and `LONG_MAX_EXTENSION_ATR`, and are applied consistently to live analysis and backtests.

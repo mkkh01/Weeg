@@ -59,6 +59,32 @@ def _swing_state(candles: list[dict[str, float]], lookback: int = 3) -> tuple[st
     return "NEUTRAL", points[-8:]
 
 
+def _detect_bullish_fvg(candles: list[dict[str, float]], current: float, atr: float) -> dict[str, Any]:
+    """Find the latest unfilled bullish three-candle fair value gap."""
+    if len(candles) < 3:
+        return {"state": "NONE", "lower": None, "upper": None, "age": None, "retest_ready": False}
+    latest = None
+    start = max(0, len(candles) - 80)
+    for i in range(start, len(candles) - 2):
+        left = candles[i]
+        right = candles[i + 2]
+        if float(right["low"]) <= float(left["high"]):
+            continue
+        lower, upper = float(left["high"]), float(right["low"])
+        if any(float(c["low"]) <= lower for c in candles[i + 3:]):
+            continue
+        latest = {"lower": lower, "upper": upper, "age": len(candles) - 1 - i}
+    if latest is None:
+        return {"state": "NONE", "lower": None, "upper": None, "age": None, "retest_ready": False}
+    distance = max(current - latest["upper"], 0.0) / max(atr, 1e-9)
+    latest.update({
+        "state": "BULLISH",
+        "retest_ready": current >= latest["lower"] and distance <= 0.5,
+        "distance_atr": round(distance, 3),
+    })
+    return latest
+
+
 def _regime(closes: list[float], atr: float, low_volatility: float, high_volatility: float) -> str:
     if len(closes) < 30:
         return "TRANSITION"
@@ -107,6 +133,7 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
     structure, swings = _swing_state(candles, profile.swing_lookback)
     regime = _regime(closes, atr, profile.low_volatility, profile.high_volatility)
     ema20, ema50 = _ema(closes, 20)[-1], _ema(closes, 50)[-1]
+    bullish_fvg = _detect_bullish_fvg(candles, current, atr)
     avg_vol = sum(float(c["volume"]) for c in candles[-20:]) / 20
     rel_vol = float(candles[-1]["volume"]) / max(avg_vol, 1e-9)
 
@@ -157,6 +184,9 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
     return {
         **base,
         "price": _fmt(current),
+        "ema20": _fmt(ema20),
+        "atr": _fmt(atr),
+        "recent_high": _fmt(max(float(c["high"]) for c in candles[-21:-1])) if len(candles) > 21 else None,
         "regime": regime,
         "htf_trend": "BULLISH" if ema20 > ema50 else "BEARISH",
         "structure": structure,
@@ -166,6 +196,12 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "volume": "CONFIRMED" if volume_score >= 10 else "WEAK",
         "relative_volume": round(rel_vol, 3),
         "atr_percent": round(atr_pct * 100, 3),
+        "fvg_state": bullish_fvg.get("state", "NONE"),
+        "fvg_lower": _fmt(bullish_fvg["lower"]) if bullish_fvg.get("lower") is not None else None,
+        "fvg_upper": _fmt(bullish_fvg["upper"]) if bullish_fvg.get("upper") is not None else None,
+        "fvg_age": bullish_fvg.get("age"),
+        "fvg_retest_ready": bool(bullish_fvg.get("retest_ready")),
+        "fvg_distance_atr": bullish_fvg.get("distance_atr"),
         "confidence": confidence,
         "signal": signal,
         "entry": _fmt(entry),
@@ -186,6 +222,10 @@ def apply_signal_filters(
     long_min_confidence: int = 85,
     long_allow_ranging: bool = False,
     long_allow_mid_cap: bool = False,
+    long_require_fvg: bool = False,
+    long_peak_lookback: int = 20,
+    long_peak_distance_atr: float = 0.35,
+    long_max_extension_atr: float = 1.5,
 ) -> dict[str, Any]:
     """Apply deployment-level directional filters without changing raw indicator output."""
     filtered = dict(result)
@@ -202,6 +242,16 @@ def apply_signal_filters(
             vetoes.append("LONG ممنوع في نظام RANGING")
         if not long_allow_mid_cap and filtered.get("asset_profile") == "mid_cap":
             vetoes.append("LONG ممنوع للأصول من ملف mid_cap")
+        if long_require_fvg and not filtered.get("fvg_retest_ready"):
+            vetoes.append("LONG يحتاج إعادة اختبار FVG صاعد غير ممتلئ")
+        recent_high = filtered.get("recent_high")
+        atr = float(filtered.get("atr") or 0)
+        current = float(filtered.get("price") or 0)
+        ema20 = float(filtered.get("ema20") or 0)
+        if recent_high and atr > 0 and current >= recent_high - (atr * long_peak_distance_atr):
+            vetoes.append("LONG مرفوض قرب قمة حديثة")
+        if atr > 0 and ema20 > 0 and current - ema20 > atr * long_max_extension_atr:
+            vetoes.append("LONG مرفوض بسبب امتداد سعري فوق EMA20")
     if vetoes:
         filtered["signal_before_filters"] = signal
         filtered["signal"] = "NO TRADE"

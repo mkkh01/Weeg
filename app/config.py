@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     long_min_confidence: int = 85
     long_allow_ranging: bool = False
     long_allow_mid_cap: bool = False
+    long_require_fvg: bool = True
+    long_peak_distance_atr: float = 0.35
+    long_max_extension_atr: float = 1.5
     fee_rate: float = 0.0004
     slippage_rate: float = 0.0002
     account_equity: float | None = None
