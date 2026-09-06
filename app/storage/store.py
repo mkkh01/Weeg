@@ -16,6 +16,8 @@ class Store:
         "exit_reason", "exit_price", "created_at", "closed_at", "source", "auto_created", "asset_profile",
         "signal_reasons", "mtf_alignment", "mtf_vetoes", "mtf_timeframes", "signal_before_filters", "filter_vetoes",
         "gross_pnl", "fees_and_slippage_pct", "risk_amount", "position_size", "notional",
+        "entry_path", "fvg_lower", "fvg_upper", "fvg_age", "fvg_retest_ready", "fvg_touched", "fvg_distance_atr",
+        "recent_high", "recent_high_50", "signal_range_atr", "stop_distance_atr", "stop_method",
     }
     PG_UPDATE_FIELDS = PG_TRADE_FIELDS - {"id", "created_at"}
 
@@ -151,8 +153,10 @@ class Store:
                add column if not exists long_allow_mid_cap boolean not null default false,
                add column if not exists long_require_fvg boolean not null default false,
                add column if not exists long_prefer_fvg boolean not null default true,
-               add column if not exists long_peak_distance_atr numeric not null default 0.35,
-               add column if not exists long_max_extension_atr numeric not null default 1.5,
+               add column if not exists long_peak_distance_atr numeric not null default 0.5,
+               add column if not exists long_max_extension_atr numeric not null default 1.25,
+               add column if not exists long_resistance_distance_atr numeric not null default 0.5,
+               add column if not exists long_max_signal_range_atr numeric not null default 1.5,
                add column if not exists fee_rate numeric not null default 0.0004,
                add column if not exists slippage_rate numeric not null default 0.0002,
                add column if not exists account_equity numeric""",
@@ -163,7 +167,19 @@ class Store:
                add column if not exists fees_and_slippage_pct numeric,
                add column if not exists risk_amount numeric,
                add column if not exists position_size numeric,
-               add column if not exists notional numeric""",
+               add column if not exists notional numeric,
+               add column if not exists entry_path text,
+               add column if not exists fvg_lower numeric,
+               add column if not exists fvg_upper numeric,
+               add column if not exists fvg_age integer,
+               add column if not exists fvg_retest_ready boolean,
+               add column if not exists fvg_touched boolean,
+               add column if not exists fvg_distance_atr numeric,
+               add column if not exists recent_high numeric,
+               add column if not exists recent_high_50 numeric,
+               add column if not exists signal_range_atr numeric,
+               add column if not exists stop_distance_atr numeric,
+               add column if not exists stop_method text""",
         )
         try:
             for statement in statements:
@@ -480,8 +496,8 @@ class Store:
             current = await self.get_settings()
             merged = {**current, **settings}
             symbols = merged.get("symbols") or []
-            fields = ["symbols", "macro_timeframe", "trend_timeframe", "confirmation_timeframe", "execution_timeframe", "risk_per_trade", "minimum_rr", "confidence_threshold", "enable_short_signals", "long_min_confidence", "long_allow_ranging", "long_allow_mid_cap", "long_require_fvg", "long_prefer_fvg", "long_peak_distance_atr", "long_max_extension_atr", "fee_rate", "slippage_rate", "account_equity"]
-            values = [merged.get("symbols", symbols), merged.get("macro_timeframe", "4h"), merged.get("trend_timeframe", "1h"), merged.get("confirmation_timeframe", "15m"), merged.get("execution_timeframe", "5m"), merged.get("risk_per_trade", 0.005), merged.get("minimum_rr", 2.0), merged.get("confidence_threshold", 65), merged.get("enable_short_signals", False), merged.get("long_min_confidence", 85), merged.get("long_allow_ranging", False), merged.get("long_allow_mid_cap", False), merged.get("long_require_fvg", False), merged.get("long_prefer_fvg", True), merged.get("long_peak_distance_atr", 0.35), merged.get("long_max_extension_atr", 1.5), merged.get("fee_rate", 0.0004), merged.get("slippage_rate", 0.0002), merged.get("account_equity")]
+            fields = ["symbols", "macro_timeframe", "trend_timeframe", "confirmation_timeframe", "execution_timeframe", "risk_per_trade", "minimum_rr", "confidence_threshold", "enable_short_signals", "long_min_confidence", "long_allow_ranging", "long_allow_mid_cap", "long_require_fvg", "long_prefer_fvg", "long_peak_distance_atr", "long_max_extension_atr", "long_resistance_distance_atr", "long_max_signal_range_atr", "fee_rate", "slippage_rate", "account_equity"]
+            values = [merged.get("symbols", symbols), merged.get("macro_timeframe", "4h"), merged.get("trend_timeframe", "1h"), merged.get("confirmation_timeframe", "15m"), merged.get("execution_timeframe", "5m"), merged.get("risk_per_trade", 0.005), merged.get("minimum_rr", 2.0), merged.get("confidence_threshold", 65), merged.get("enable_short_signals", False), merged.get("long_min_confidence", 85), merged.get("long_allow_ranging", False), merged.get("long_allow_mid_cap", False), merged.get("long_require_fvg", False), merged.get("long_prefer_fvg", True), merged.get("long_peak_distance_atr", 0.5), merged.get("long_max_extension_atr", 1.25), merged.get("long_resistance_distance_atr", 0.5), merged.get("long_max_signal_range_atr", 1.5), merged.get("fee_rate", 0.0004), merged.get("slippage_rate", 0.0002), merged.get("account_equity")]
             current_id = current.get("id")
             if current_id:
                 assignments = ", ".join([f"{field} = %s" for field in fields])

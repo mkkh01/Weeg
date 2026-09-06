@@ -73,6 +73,8 @@ class SettingsInput(BaseModel):
     long_prefer_fvg: bool | None = None
     long_peak_distance_atr: float | None = None
     long_max_extension_atr: float | None = None
+    long_resistance_distance_atr: float | None = None
+    long_max_signal_range_atr: float | None = None
     fee_rate: float | None = None
     slippage_rate: float | None = None
     account_equity: float | None = None
@@ -103,6 +105,8 @@ def _apply_deployment_filters(result: dict) -> dict:
         long_prefer_fvg=settings.long_prefer_fvg,
         long_peak_distance_atr=settings.long_peak_distance_atr,
         long_max_extension_atr=settings.long_max_extension_atr,
+        long_resistance_distance_atr=settings.long_resistance_distance_atr,
+        long_max_signal_range_atr=settings.long_max_signal_range_atr,
     )
 
 
@@ -203,6 +207,17 @@ async def _scan_and_store_auto_signals() -> list[dict]:
                 "liquidity_state": result.get("liquidity"),
                 "fvg_state": result.get("fvg_state", "UNKNOWN"),
                 "entry_path": result.get("entry_path", "UNKNOWN"),
+                "fvg_lower": result.get("fvg_lower"),
+                "fvg_upper": result.get("fvg_upper"),
+                "fvg_age": result.get("fvg_age"),
+                "fvg_retest_ready": result.get("fvg_retest_ready"),
+                "fvg_touched": result.get("fvg_touched"),
+                "fvg_distance_atr": result.get("fvg_distance_atr"),
+                "recent_high": result.get("recent_high"),
+                "recent_high_50": result.get("recent_high_50"),
+                "signal_range_atr": result.get("signal_range_atr"),
+                "stop_distance_atr": result.get("stop_distance_atr"),
+                "stop_method": result.get("stop_method"),
                 "volume_state": result.get("volume"),
                 "momentum_state": result.get("momentum"),
                 "status": "OPEN",
@@ -526,6 +541,8 @@ async def summary_cycle(response: Response):
             "long_prefer_fvg": settings.long_prefer_fvg,
             "long_peak_distance_atr": settings.long_peak_distance_atr,
             "long_max_extension_atr": settings.long_max_extension_atr,
+            "long_resistance_distance_atr": settings.long_resistance_distance_atr,
+            "long_max_signal_range_atr": settings.long_max_signal_range_atr,
             "fee_rate": settings.fee_rate,
             "slippage_rate": settings.slippage_rate,
         },
@@ -581,6 +598,8 @@ async def backtest(symbol: str, interval: str = "15m", limit: int = 500):
         long_prefer_fvg=settings.long_prefer_fvg,
         long_peak_distance_atr=settings.long_peak_distance_atr,
         long_max_extension_atr=settings.long_max_extension_atr,
+        long_resistance_distance_atr=settings.long_resistance_distance_atr,
+        long_max_signal_range_atr=settings.long_max_signal_range_atr,
     )
 
 @app.get("/api/trades")
@@ -601,7 +620,7 @@ async def update_trade(trade_id: str, patch: dict):
 @app.get("/api/settings")
 async def get_app_settings():
     saved = await store.get_settings()
-    return {"symbols": settings.symbol_list, "confidence_threshold": settings.confidence_threshold, "minimum_rr": settings.minimum_rr, "risk_per_trade": settings.risk_per_trade, "enable_short_signals": settings.enable_short_signals, "long_min_confidence": settings.long_min_confidence, "long_allow_ranging": settings.long_allow_ranging, "long_allow_mid_cap": settings.long_allow_mid_cap, "long_require_fvg": settings.long_require_fvg, "long_prefer_fvg": settings.long_prefer_fvg, "long_peak_distance_atr": settings.long_peak_distance_atr, "long_max_extension_atr": settings.long_max_extension_atr, "fee_rate": settings.fee_rate, "slippage_rate": settings.slippage_rate, "account_equity": settings.account_equity, **saved}
+    return {"symbols": settings.symbol_list, "confidence_threshold": settings.confidence_threshold, "minimum_rr": settings.minimum_rr, "risk_per_trade": settings.risk_per_trade, "enable_short_signals": settings.enable_short_signals, "long_min_confidence": settings.long_min_confidence, "long_allow_ranging": settings.long_allow_ranging, "long_allow_mid_cap": settings.long_allow_mid_cap, "long_require_fvg": settings.long_require_fvg, "long_prefer_fvg": settings.long_prefer_fvg, "long_peak_distance_atr": settings.long_peak_distance_atr, "long_max_extension_atr": settings.long_max_extension_atr, "long_resistance_distance_atr": settings.long_resistance_distance_atr, "long_max_signal_range_atr": settings.long_max_signal_range_atr, "fee_rate": settings.fee_rate, "slippage_rate": settings.slippage_rate, "account_equity": settings.account_equity, **saved}
 
 @app.post("/api/settings")
 async def save_app_settings(payload: SettingsInput):

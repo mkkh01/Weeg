@@ -3,7 +3,7 @@ from typing import Any
 from .engine import analyze, apply_signal_filters
 
 
-def run_backtest(symbol: str, candles: list[dict[str, Any]], interval: str = "15m", fee_rate: float = 0.0004, slippage: float = 0.0002, threshold: int = 65, minimum_rr: float = 2.0, split: float = 0.7, enable_short: bool = False, long_min_confidence: int = 85, long_allow_ranging: bool = False, long_allow_mid_cap: bool = False, long_require_fvg: bool = False, long_prefer_fvg: bool = True, long_peak_distance_atr: float = 0.35, long_max_extension_atr: float = 1.5) -> dict[str, Any]:
+def run_backtest(symbol: str, candles: list[dict[str, Any]], interval: str = "15m", fee_rate: float = 0.0004, slippage: float = 0.0002, threshold: int = 65, minimum_rr: float = 2.0, split: float = 0.7, enable_short: bool = False, long_min_confidence: int = 85, long_allow_ranging: bool = False, long_allow_mid_cap: bool = False, long_require_fvg: bool = False, long_prefer_fvg: bool = True, long_peak_distance_atr: float = 0.5, long_max_extension_atr: float = 1.25, long_resistance_distance_atr: float = 0.5, long_max_signal_range_atr: float = 1.5) -> dict[str, Any]:
     if len(candles) < 80:
         return {"error": "تحتاج المحاكاة إلى 80 شمعة على الأقل"}
     cut = max(60, int(len(candles) * split)); trades = []; equity = 0.0; peak = 0.0; max_dd = 0.0
@@ -18,6 +18,8 @@ def run_backtest(symbol: str, candles: list[dict[str, Any]], interval: str = "15
             long_prefer_fvg=long_prefer_fvg,
             long_peak_distance_atr=long_peak_distance_atr,
             long_max_extension_atr=long_max_extension_atr,
+            long_resistance_distance_atr=long_resistance_distance_atr,
+            long_max_signal_range_atr=long_max_signal_range_atr,
         )
         if signal.get("signal") not in ("LONG", "SHORT"): continue
         entry = float(candles[i]["open"]); direction = signal["signal"]

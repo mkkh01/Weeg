@@ -77,9 +77,14 @@ def _detect_bullish_fvg(candles: list[dict[str, float]], current: float, atr: fl
     if latest is None:
         return {"state": "NONE", "lower": None, "upper": None, "age": None, "retest_ready": False}
     distance = max(current - latest["upper"], 0.0) / max(atr, 1e-9)
+    touched = any(
+        float(c["low"]) <= latest["upper"] and float(c["high"]) >= latest["lower"]
+        for c in candles[-8:]
+    )
     latest.update({
         "state": "BULLISH",
-        "retest_ready": current >= latest["lower"] and distance <= 0.5,
+        "touched": touched,
+        "retest_ready": touched and current >= latest["lower"] and current <= latest["upper"] + (atr * 0.15),
         "distance_atr": round(distance, 3),
     })
     return latest
@@ -152,13 +157,29 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
     entry = current
     target_rr = effective_minimum_rr
     target_extension = target_rr + 1.0
+    stop_method = "ATR_BUFFER"
+    structural_lows = [float(point["price"]) for point in swings if point.get("kind") == "low"]
+    structural_highs = [float(point["price"]) for point in swings if point.get("kind") == "high"]
     if direction == "LONG":
-        sl, tp1, tp2 = current - risk_buffer, current + risk_buffer * target_rr, current + risk_buffer * target_extension
+        sl = current - risk_buffer
+        if structural_lows:
+            structural_sl = structural_lows[-1] - (atr * 0.15)
+            if structural_sl < sl:
+                sl, stop_method = structural_sl, "STRUCTURAL_SWING_LOW"
+        risk_distance = abs(entry - sl)
+        tp1, tp2 = current + risk_distance * target_rr, current + risk_distance * target_extension
     elif direction == "SHORT":
-        sl, tp1, tp2 = current + risk_buffer, current - risk_buffer * target_rr, current - risk_buffer * target_extension
+        sl = current + risk_buffer
+        if structural_highs:
+            structural_sl = structural_highs[-1] + (atr * 0.15)
+            if structural_sl > sl:
+                sl, stop_method = structural_sl, "STRUCTURAL_SWING_HIGH"
+        risk_distance = abs(entry - sl)
+        tp1, tp2 = current - risk_distance * target_rr, current - risk_distance * target_extension
     else:
         sl, tp1, tp2 = current - risk_buffer, current + risk_buffer * target_rr, current + risk_buffer * target_extension
-    rr = abs(tp1 - entry) / max(abs(entry - sl), 1e-9)
+        risk_distance = abs(entry - sl)
+    rr = abs(tp1 - entry) / max(risk_distance, 1e-9)
 
     reasons = [f"ملف الأصل: {profile.label}"]
     if structure != "NEUTRAL":
@@ -187,6 +208,10 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "ema20": _fmt(ema20),
         "atr": _fmt(atr),
         "recent_high": _fmt(max(float(c["high"]) for c in candles[-21:-1])) if len(candles) > 21 else None,
+        "recent_high_50": _fmt(max(float(c["high"]) for c in candles[-51:-1])) if len(candles) > 51 else None,
+        "signal_range_atr": _fmt((float(candles[-1]["high"]) - float(candles[-1]["low"])) / max(atr, 1e-9)),
+        "stop_distance_atr": _fmt(abs(entry - sl) / max(atr, 1e-9)),
+        "stop_method": stop_method,
         "regime": regime,
         "htf_trend": "BULLISH" if ema20 > ema50 else "BEARISH",
         "structure": structure,
@@ -201,6 +226,7 @@ def analyze(symbol: str, candles: list[dict[str, float]], interval: str = "15m",
         "fvg_upper": _fmt(bullish_fvg["upper"]) if bullish_fvg.get("upper") is not None else None,
         "fvg_age": bullish_fvg.get("age"),
         "fvg_retest_ready": bool(bullish_fvg.get("retest_ready")),
+        "fvg_touched": bool(bullish_fvg.get("touched")),
         "fvg_distance_atr": bullish_fvg.get("distance_atr"),
         "confidence": confidence,
         "signal": signal,
@@ -225,8 +251,10 @@ def apply_signal_filters(
     long_require_fvg: bool = False,
     long_prefer_fvg: bool = True,
     long_peak_lookback: int = 20,
-    long_peak_distance_atr: float = 0.35,
-    long_max_extension_atr: float = 1.5,
+    long_peak_distance_atr: float = 0.5,
+    long_max_extension_atr: float = 1.25,
+    long_resistance_distance_atr: float = 0.5,
+    long_max_signal_range_atr: float = 1.5,
 ) -> dict[str, Any]:
     """Apply deployment-level directional filters without changing raw indicator output."""
     filtered = dict(result)
@@ -260,13 +288,19 @@ def apply_signal_filters(
                 else:
                     filtered["entry_path"] = "FALLBACK_CONFIRMATION"
         recent_high = filtered.get("recent_high")
+        recent_high_50 = filtered.get("recent_high_50")
         atr = float(filtered.get("atr") or 0)
         current = float(filtered.get("price") or 0)
         ema20 = float(filtered.get("ema20") or 0)
+        signal_range_atr = float(filtered.get("signal_range_atr") or 0)
         if recent_high and atr > 0 and current >= recent_high - (atr * long_peak_distance_atr):
             vetoes.append("LONG مرفوض قرب قمة حديثة")
+        if recent_high_50 and atr > 0 and current >= recent_high_50 - (atr * long_resistance_distance_atr):
+            vetoes.append("LONG مرفوض قرب مقاومة أوسع")
         if atr > 0 and ema20 > 0 and current - ema20 > atr * long_max_extension_atr:
             vetoes.append("LONG مرفوض بسبب امتداد سعري فوق EMA20")
+        if signal_range_atr > long_max_signal_range_atr:
+            vetoes.append("LONG مرفوض بعد شمعة اندفاعية")
     if vetoes:
         filtered["signal_before_filters"] = signal
         filtered["signal"] = "NO TRADE"

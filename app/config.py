@@ -31,8 +31,10 @@ class Settings(BaseSettings):
     long_allow_mid_cap: bool = False
     long_require_fvg: bool = False
     long_prefer_fvg: bool = True
-    long_peak_distance_atr: float = 0.35
-    long_max_extension_atr: float = 1.5
+    long_peak_distance_atr: float = 0.5
+    long_max_extension_atr: float = 1.25
+    long_resistance_distance_atr: float = 0.5
+    long_max_signal_range_atr: float = 1.5
     fee_rate: float = 0.0004
     slippage_rate: float = 0.0002
     account_equity: float | None = None
